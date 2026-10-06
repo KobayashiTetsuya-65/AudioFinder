@@ -29,31 +29,93 @@ function showMsg(el, type, text) {
   el.innerHTML = text ? `<div class="band ${type} msg-band">${type === "error" ? "✖" : "⚠"}<div class="msg">${esc(text)}</div></div>` : "";
 }
 
+const fmtDate = (iso) => iso.slice(0, 16).replace("T", " ");
+
 /* ---------- 設定：検索対象フォルダ ---------- */
+
+let rootsCache = [];
+let indexSummary = null; // GET /api/scan の index（まだスキャンしていなければ null）
 
 async function loadRoots() {
   try {
     const { roots } = await api("GET", "/api/roots");
-    renderRoots(roots);
+    rootsCache = roots;
+    renderRoots();
   } catch (e) {
     showMsg($("#roots-msg"), "error", e.message);
   }
 }
 
-function renderRoots(roots) {
-  if (roots.length === 0) {
+function statusCell(r) {
+  if (!r.enabled) return [`<td class="hint">無効</td>`, `<td class="num">—</td>`];
+  const st = indexSummary && indexSummary.roots.find((x) => x.id === r.id);
+  // 目録にないフォルダ（追加後・有効に戻した後にまだ再スキャンしていない）
+  if (!st) return [`<td class="hint">未スキャン</td>`, `<td class="num">—</td>`];
+  return [
+    `<td>${st.status === "ok" ? `<span class="status-ok">● OK</span>` : `<span class="status-missing">● 見つかりません</span>`}</td>`,
+    `<td class="num">${st.file_count.toLocaleString()}</td>`,
+  ];
+}
+
+function renderRoots() {
+  $("#stat-roots").textContent = rootsCache.length;
+  if (rootsCache.length === 0) {
     $("#roots").innerHTML = `<tr><td colspan="5" class="hint">まだフォルダが登録されていません。下の「フォルダを追加」から登録してください。</td></tr>`;
     return;
   }
-  // 状態とファイル数は再スキャン（目録）ができてから表示する
-  $("#roots").innerHTML = roots.map((r) => `<tr data-id="${esc(r.id)}">
+  $("#roots").innerHTML = rootsCache.map((r) => `<tr data-id="${esc(r.id)}">
       <td><button type="button" class="toggle ${r.enabled ? "on" : ""}" title="${r.enabled ? "有効（クリックで無効に）" : "無効（クリックで有効に）"}" aria-pressed="${r.enabled}"></button></td>
       <td><b>${esc(r.label)}</b><div class="path">${esc(r.path)}</div></td>
-      <td class="hint">未スキャン</td>
-      <td class="num">—</td>
+      ${statusCell(r).join("")}
       <td><button type="button" class="btn small danger">削除</button></td>
     </tr>`).join("");
 }
+
+/* ---------- 設定：目録（再スキャン） ---------- */
+
+let scanTimer = null;
+
+function renderScan(s) {
+  indexSummary = s.index;
+  $("#stat-files").textContent = s.index ? s.index.file_count.toLocaleString() : "—";
+  $("#stat-scanned").textContent = s.index ? fmtDate(s.index.scanned_at) : "—";
+  $("#rescan").disabled = s.running;
+
+  let pct = 0;
+  let text = "まだスキャンしていません";
+  if (s.running) {
+    pct = s.total ? (s.done / s.total) * 100 : 0;
+    text = s.total ? `スキャン中… <span class="num">${s.done.toLocaleString()} / ${s.total.toLocaleString()}</span> ファイル` : "スキャン中… ファイルを数えています";
+  } else if (s.index) {
+    pct = 100;
+    text = `スキャン完了：<span class="num">${s.index.file_count.toLocaleString()}</span> ファイル`;
+  }
+  $("#scan-bar").style.width = `${pct}%`;
+  $("#scan-text").innerHTML = text;
+  if (s.error) showMsg($("#scan-msg"), "error", s.error);
+  renderRoots();
+}
+
+async function pollScan() {
+  clearTimeout(scanTimer);
+  try {
+    const s = await api("GET", "/api/scan");
+    renderScan(s);
+    if (s.running) scanTimer = setTimeout(pollScan, 300);
+  } catch (e) {
+    showMsg($("#scan-msg"), "error", e.message);
+  }
+}
+
+$("#rescan").addEventListener("click", async () => {
+  showMsg($("#scan-msg"), "", "");
+  try {
+    await api("POST", "/api/scan");
+  } catch (e) {
+    showMsg($("#scan-msg"), "error", e.message);
+  }
+  pollScan();
+});
 
 $("#roots").addEventListener("click", async (ev) => {
   const row = ev.target.closest("tr[data-id]");
@@ -91,3 +153,4 @@ $("#add-root").addEventListener("submit", async (ev) => {
 });
 
 loadRoots();
+pollScan();

@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import storage
+from app import scanner, storage
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 JST = timezone(timedelta(hours=9))
@@ -115,6 +115,51 @@ def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR) -> FastAPI:
                 raise HTTPException(404, "そのフォルダは登録されていません")
             config["roots"] = remaining
             storage.save_json(config_path, config)
+
+    # ---------- 再スキャン（index.json） ----------
+
+    def _summary(index):
+        """画面に出す目録の要約（ファイル一覧は返さない）。"""
+        if index is None:
+            return None
+        return {"scanned_at": index["scanned_at"], "roots": index["roots"], "file_count": len(index["files"])}
+
+    # 要約はメモリに持つ。index.json を毎回開くと、Windowsではスキャン完了時の置き換えとぶつかることがあるため
+    scan_state = {"running": False, "done": 0, "total": 0, "error": None, "index": _summary(scanner.load_index(data_dir))}
+    scan_lock = threading.Lock()
+
+    def _progress(done, total):
+        with scan_lock:
+            scan_state.update(done=done, total=total)
+
+    def _run_scan(config):
+        error = None
+        try:
+            index = scanner.scan(config, _progress)
+            scanner.save_index(data_dir, index)
+        except Exception as e:
+            error = f"スキャン中にエラーが起きました：{e}"
+        with scan_lock:
+            scan_state.update(running=False, error=error)
+            if error is None:
+                scan_state["index"] = _summary(index)
+
+    @app.post("/api/scan", status_code=202)
+    def start_scan():
+        with scan_lock:
+            if scan_state["running"]:
+                raise HTTPException(409, "スキャン中です。終わるまでお待ちください")
+            scan_state.update(running=True, done=0, total=0, error=None)
+        with lock:
+            config = storage.load_config(data_dir)
+        threading.Thread(target=_run_scan, args=(config,), daemon=True).start()
+        return {"started": True}
+
+    @app.get("/api/scan")
+    def scan_status():
+        """進行状況と、最後にできた目録の要約。"""
+        with scan_lock:
+            return dict(scan_state)
 
     # API より後に登録する（"/" 以下をすべて受けるため）
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

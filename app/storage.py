@@ -27,18 +27,21 @@ def load_json(path: Path):
         return json.load(f)
 
 
-def save_json(path: Path, data) -> None:
+def save_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            f.write("\n")
+            f.write(text)
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
             os.remove(tmp)
         raise
+
+
+def save_json(path: Path, data) -> None:
+    save_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 
 
 def load_config(data_dir: Path = DEFAULT_DATA_DIR) -> dict:
