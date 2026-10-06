@@ -14,19 +14,19 @@ SPEC.md と mock/index.html をもとにした実装の順番。上から1つず
 ---
 
 ## タスク1：最小限だけ動く骨組み
-- [ ] `requirements.txt`（fastapi / uvicorn / mutagen を `==` で固定）と `requirements-dev.txt`（pytest / httpx）
-- [ ] `start.bat`：`.venv` がなければ作って `requirements.txt` を入れる → サーバー起動 → ブラウザで `http://127.0.0.1:8765` を開く
-- [ ] `app/main.py`：`static/` の配信と `GET /api/health`
-- [ ] `app/storage.py`：JSONの読み書き（一時ファイル→置き換え）。`data/config.json` がなければ初期値で作る（SPEC 9.2）
-- [ ] `static/`：ヘッダー・メニュー「探す／履歴／設定」・3画面の空の枠（中身なし）
-- [ ] `tests/`：pytest の土台と最初のテスト
+- [x] `requirements.txt`（fastapi / uvicorn / mutagen を `==` で固定）と `requirements-dev.txt`（pytest / httpx）
+- [x] `start.bat`：`.venv` がなければ作って `requirements.txt` を入れる → サーバー起動 → ブラウザで `http://127.0.0.1:8765` を開く
+- [x] `app/main.py`：`static/` の配信と `GET /api/health`
+- [x] `app/storage.py`：JSONの読み書き（一時ファイル→置き換え）。`data/config.json` がなければ初期値で作る（SPEC 9.2）
+- [x] `static/`：ヘッダー・メニュー「探す／履歴／設定」・3画面の空の枠（中身なし）
+- [x] `tests/`：pytest の土台と最初のテスト
 
 **完了条件**
-- [ ] `start.bat` をダブルクリックすると、初回はライブラリが入り、ブラウザが自動で開く
-- [ ] モックと同じ見た目のヘッダーが出て、メニューで3画面を切り替えられる
-- [ ] `data/config.json` が SPEC 9.2 の初期値で作られる
-- [ ] `127.0.0.1` 以外（同じLANの別の端末など）からは開けない
-- [ ] pytest が通る（`/api/health` が200、config の初期作成）
+- [x] `start.bat` をダブルクリックすると、初回はライブラリが入り、ブラウザが自動で開く
+- [x] モックと同じ見た目のヘッダーが出て、メニューで3画面を切り替えられる
+- [x] `data/config.json` が SPEC 9.2 の初期値で作られる
+- [x] `127.0.0.1` 以外（同じLANの別の端末など）からは開けない
+- [x] pytest が通る（`/api/health` が200、config の初期作成）
 
 ## タスク2：設定画面 ― 検索対象フォルダの登録
 - [ ] API：フォルダの一覧・追加・削除・有効/無効の切り替え（`config.json` の `roots`）
