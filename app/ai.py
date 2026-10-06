@@ -8,14 +8,16 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import quote
 
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "search.md"
 MAX_LOCAL = 10  # SPEC 4.2
+MAX_PER_SITE = 3  # SPEC 4.3
 
 KINDS = ("bgm", "se", "ambient")
 TEMPOS = ("slow", "medium", "fast")
 
-# 応答の形（SPEC 9.4）。この段階では条件とローカル候補だけ（sites はタスク6で足す）
+# 応答の形（SPEC 9.4）
 RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -34,8 +36,21 @@ RESPONSE_SCHEMA = {
             "type": "array",
             "items": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
         },
+        "sites": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "site_id": {"type": "string"},
+                    "type": {"type": "string", "enum": ["category", "search"]},
+                    "category_id": {"type": "string"},
+                    "q": {"type": "string"},
+                },
+                "required": ["site_id", "type"],
+            },
+        },
     },
-    "required": ["conditions", "local"],
+    "required": ["conditions", "local", "sites"],
 }
 
 
@@ -128,8 +143,60 @@ def _clean_conditions(c) -> dict:
     }
 
 
-def validate(answer: dict, known_ids) -> dict:
-    """SPEC 6.4：目録にないIDは捨てる。重複も除き、最大10件に切り詰める。"""
+def sites_for_prompt(sites: list) -> str:
+    """AIに渡すサイト一覧（sites.json から URL を除いたもの）。URLはサーバーが組み立てるので見せない（SPEC 6.3）。"""
+    return json.dumps([
+        {
+            "site_id": s["id"],
+            "name": s["name"],
+            "kinds": s["kinds"],
+            "search": s.get("search_url") is not None,
+            "categories": [{"category_id": c["id"], "name": c["name"], "kind": c["kind"]} for c in s["categories"]],
+            "note": s.get("note", ""),
+        }
+        for s in sites
+    ], ensure_ascii=False, indent=1)
+
+
+def build_site_links(raw, sites: list, kind: str) -> list:
+    """SPEC 6.4：AIが返した site_id＋category_id／q から、sites.json をもとに URL を組み立てる。
+
+    次のものは捨てる：sites.json にない site_id・category_id、search_url が null のサイトへの検索、空の検索語、
+    場面の種類（kind）を扱わないサイトやカテゴリ（SPEC 6.3）、同じ案内の重複。各サイト最大3件。
+    """
+    if not isinstance(raw, list):
+        return []
+    by_id = {s["id"]: s for s in sites}
+    links, seen, per_site = [], set(), {}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        site = by_id.get(item.get("site_id"))
+        if site is None or kind not in site["kinds"]:
+            continue
+        if item.get("type") == "category":
+            cat = next((c for c in site["categories"] if c["id"] == item.get("category_id")), None)
+            if cat is None or cat["kind"] != kind:
+                continue
+            label, url = cat["name"], cat["url"]
+        elif item.get("type") == "search":
+            q = item.get("q")
+            q = " ".join(q.split()) if isinstance(q, str) else ""
+            if not q or site.get("search_url") is None:
+                continue
+            label, url = f"検索：{q}", site["search_url"].replace("{q}", quote(q, safe=""))
+        else:
+            continue
+        if url in seen or per_site.get(site["id"], 0) >= MAX_PER_SITE:
+            continue
+        seen.add(url)
+        per_site[site["id"]] = per_site.get(site["id"], 0) + 1
+        links.append({"site_id": site["id"], "site_name": site["name"], "label": label, "url": url})
+    return links
+
+
+def validate(answer: dict, known_ids, sites: list = ()) -> dict:
+    """SPEC 6.4：目録にないIDは捨てる。重複も除き、最大10件に切り詰める。サイトの案内は build_site_links で確かめる。"""
     local = answer.get("local")
     if not isinstance(local, list):
         raise AIError("AIの応答の形が正しくありません（候補の一覧がありません）")
@@ -138,10 +205,16 @@ def validate(answer: dict, known_ids) -> dict:
         fid = item.get("id") if isinstance(item, dict) else None
         if isinstance(fid, str) and fid in known_ids and fid not in ids:
             ids.append(fid)
-    return {"conditions": _clean_conditions(answer.get("conditions")), "local": [{"id": i} for i in ids[:MAX_LOCAL]]}
+    conditions = _clean_conditions(answer.get("conditions"))
+    return {
+        "conditions": conditions,
+        "local": [{"id": i} for i in ids[:MAX_LOCAL]],
+        "sites": build_site_links(answer.get("sites"), list(sites), conditions["kind"]),
+    }
 
 
-def search(query: str, data_dir: Path, known_ids, timeout_sec: float, runner=run_claude) -> dict:
-    """場面の説明から、条件とローカル候補を返す。作業フォルダは data/（AIはそこの index.json を検索する）。"""
-    stdout = runner(f"場面の説明：\n{query}", data_dir, timeout_sec)
-    return validate(_parse_answer(stdout), known_ids)
+def search(query: str, data_dir: Path, known_ids, timeout_sec: float, runner=run_claude, sites: list = ()) -> dict:
+    """場面の説明から、条件・ローカル候補・サイトへの案内を返す。作業フォルダは data/（AIはそこの index.json を検索する）。"""
+    prompt = f"場面の説明：\n{query}\n\n誘導先サイトの一覧：\n{sites_for_prompt(list(sites))}"
+    stdout = runner(prompt, data_dir, timeout_sec)
+    return validate(_parse_answer(stdout), known_ids, sites)

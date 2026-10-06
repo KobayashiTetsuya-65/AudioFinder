@@ -69,6 +69,21 @@ function tracksHtml(tracks) {
   return `<div class="win"><div class="win-title">手持ちの素材 <span class="sub">${tracks.length}件</span></div><ul class="tracks">${rows}</ul></div>`;
 }
 
+// links: [{ site_id, site_name, label, url }]。サイトごとのカードにまとめる（並びはAIが返した順）
+function sitesHtml(links) {
+  const groups = new Map();
+  links.forEach((l) => {
+    if (!groups.has(l.site_id)) groups.set(l.site_id, { name: l.site_name, links: [] });
+    groups.get(l.site_id).links.push(l);
+  });
+  const cards = [...groups.values()].map((g) => `
+    <div class="site"><h4>${esc(g.name)}</h4>
+      ${g.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer" title="${esc(l.url)}"><span>${esc(l.label)}</span><span class="ext">サイトで開く ↗</span></a>`).join("")}
+    </div>`).join("");
+  const inner = cards ? `<div class="sites">${cards}</div>` : `<div class="hint">合うサイトの探し先はありませんでした</div>`;
+  return `<div class="win"><div class="win-title">国内サイトで探す <span class="sub">試聴・ダウンロードはサイト側で</span></div>${inner}</div>`;
+}
+
 /* ---------- 試聴・エクスプローラーで開く ---------- */
 
 // 同時に鳴るのは1つだけにするため、音を出すのはこの1つの Audio だけ
@@ -156,7 +171,7 @@ $("#quest").addEventListener("submit", async (ev) => {
   showSearching();
   try {
     const r = await api("POST", "/api/search", { query: ev.target.elements.query.value });
-    body.innerHTML = conditionsHtml(r.conditions) + tracksHtml(r.local);
+    body.innerHTML = conditionsHtml(r.conditions) + tracksHtml(r.local) + sitesHtml(r.sites);
   } catch (e) {
     showMsg(body, "error", e.message);
   } finally {
