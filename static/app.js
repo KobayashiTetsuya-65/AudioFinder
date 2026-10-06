@@ -30,6 +30,73 @@ function showMsg(el, type, text) {
 }
 
 const fmtDate = (iso) => iso.slice(0, 16).replace("T", " ");
+const fmtDur = (sec) => sec == null ? "--:--" : `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
+
+/* ---------- 探す ---------- */
+
+const KIND = { bgm: "BGM", se: "SE", ambient: "環境音" };
+const TEMPO = { slow: "ゆっくり", medium: "ふつう", fast: "速め" };
+
+function conditionsHtml(c) {
+  const chips = [`<span class="chip kind">${KIND[c.kind]}</span>`];
+  c.mood.forEach((m) => chips.push(`<span class="chip mood"><span class="k">雰囲気</span>${esc(m)}</span>`));
+  c.genre.forEach((g) => chips.push(`<span class="chip genre"><span class="k">ジャンル</span>${esc(g)}</span>`));
+  if (c.tempo) chips.push(`<span class="chip tempo"><span class="k">テンポ</span>${TEMPO[c.tempo]}</span>`);
+  if (c.loop === true) chips.push(`<span class="chip loop">ループ推奨</span>`);
+  return `<div class="win"><div class="win-title">読み取った条件</div><div class="chips">${chips.join("")}</div></div>`;
+}
+
+function badge(likelyBgm) {
+  if (likelyBgm === true) return `<span class="badge bgm">BGM</span>`;
+  if (likelyBgm === false) return `<span class="badge se">SE</span>`;
+  return `<span class="badge unk">?</span>`;
+}
+
+// ▶と📂はタスク5で動くようにする（今は押しても何もしない）
+function tracksHtml(tracks) {
+  const rows = tracks.map((t, i) => `
+    <li class="track" data-id="${esc(t.id)}">
+      <span class="rank num">${i + 1}</span>
+      <button type="button" class="icon-btn" title="試聴">▶</button>
+      <div class="info">
+        <div class="name">${esc(t.filename)}</div>
+        <div class="path">${esc(t.root_label)} / ${esc(t.rel_path)}</div>
+      </div>
+      ${badge(t.likely_bgm)}
+      <span class="dur num">${fmtDur(t.duration_sec)}</span>
+      <button type="button" class="icon-btn folder" title="エクスプローラーで開く">📂</button>
+    </li>`).join("");
+  return `<div class="win"><div class="win-title">手持ちの素材 <span class="sub">${tracks.length}件</span></div><ul class="tracks">${rows}</ul></div>`;
+}
+
+let searchTimer = null;
+
+function showSearching() {
+  const started = Date.now();
+  $("#search-body").innerHTML = `<div class="win loading"><div class="spell">サウンドを探索中<span class="dots"><span>.</span><span>.</span><span>.</span></span></div><div class="elapsed num">経過 0 秒</div></div>`;
+  const elapsed = $("#search-body .elapsed");
+  clearInterval(searchTimer);
+  searchTimer = setInterval(() => {
+    elapsed.textContent = `経過 ${Math.floor((Date.now() - started) / 1000)} 秒`;
+  }, 1000);
+}
+
+$("#quest").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const button = ev.target.querySelector("button");
+  const body = $("#search-body");
+  button.disabled = true;
+  showSearching();
+  try {
+    const r = await api("POST", "/api/search", { query: ev.target.elements.query.value });
+    body.innerHTML = conditionsHtml(r.conditions) + tracksHtml(r.local);
+  } catch (e) {
+    showMsg(body, "error", e.message);
+  } finally {
+    clearInterval(searchTimer);
+    button.disabled = false;
+  }
+});
 
 /* ---------- 設定：検索対象フォルダ ---------- */
 
