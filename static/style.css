@@ -179,11 +179,14 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px 16px; }
                  border-radius: 50%; background: #888; }
 .toggle.on { background: #1f5130; border-color: var(--green); }
 .toggle.on::after { left: 20px; background: var(--green); }
+button.toggle { padding: 0; font: inherit; }
+.msg-band { margin: 12px 0 0; }
 .form-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .form-row input {
   background: #0a0e1c; color: var(--text); border: 2px solid var(--line-dim); border-radius: 4px;
   padding: 8px 10px; font: inherit;
 }
+.form-row input:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px #f0c96a33; }
 .form-row input.path-in { flex: 2; min-width: 260px; }
 .form-row input.label-in { flex: 1; min-width: 160px; }
 .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }

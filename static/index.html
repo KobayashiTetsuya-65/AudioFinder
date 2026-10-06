@@ -39,9 +39,21 @@
     </div>
     <div class="win">
       <div class="win-title">検索対象フォルダ</div>
+      <table class="roots">
+        <thead><tr><th>有効</th><th>名前 / パス</th><th>状態</th><th>ファイル数</th><th></th></tr></thead>
+        <tbody id="roots"></tbody>
+      </table>
+      <div id="roots-msg"></div>
     </div>
     <div class="win">
       <div class="win-title">フォルダを追加</div>
+      <form class="form-row" id="add-root">
+        <input class="path-in" name="path" placeholder="フォルダの絶対パス（例：D:\GameAssets\Audio\SciFiPack）">
+        <input class="label-in" name="label" placeholder="表示名（例：SciFi Pack）">
+        <button class="btn" type="submit">追加</button>
+      </form>
+      <div class="hint">※ ブラウザのフォルダ選択では絶対パスが取れないため、パスは文字で入力します。追加後は「再スキャン」で目録に反映されます。</div>
+      <div id="add-root-msg"></div>
     </div>
   </section>
 </main>
