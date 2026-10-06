@@ -197,7 +197,8 @@ def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR, ai_runner=ai.run_claud
 
         started = time.monotonic()
         try:
-            result = ai.search(query, data_dir, files.keys(), config["ai"]["timeout_sec"], ai_runner)
+            result = ai.search(query, data_dir, files.keys(), config["ai"]["timeout_sec"], ai_runner,
+                               storage.load_sites(data_dir))
         except ai.AIError as e:
             raise HTTPException(502, str(e))
         elapsed = round(time.monotonic() - started, 1)
@@ -215,7 +216,8 @@ def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR, ai_runner=ai.run_claud
                 "likely_bgm": f["likely_bgm"],
                 "readable": f["readable"],
             })
-        return {"query": query, "elapsed_sec": elapsed, "conditions": result["conditions"], "local": local}
+        return {"query": query, "elapsed_sec": elapsed, "conditions": result["conditions"], "local": local,
+                "sites": result["sites"]}
 
     # ---------- 試聴・エクスプローラーで開く ----------
 

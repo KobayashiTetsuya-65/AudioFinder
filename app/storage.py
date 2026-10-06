@@ -44,6 +44,14 @@ def save_json(path: Path, data) -> None:
     save_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 
 
+def load_sites(data_dir: Path = DEFAULT_DATA_DIR) -> list:
+    """sites.json（手で編集する誘導先サイトの一覧、SPEC 9.6）の sites を返す。ファイルがなければ空。"""
+    path = data_dir / "sites.json"
+    if not path.exists():
+        return []
+    return load_json(path)["sites"]
+
+
 def load_config(data_dir: Path = DEFAULT_DATA_DIR) -> dict:
     """config.json を読む。なければ初期値で作ってから返す。"""
     path = data_dir / "config.json"
