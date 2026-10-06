@@ -3,7 +3,7 @@
 ゲーム制作用のBGM・SEを、場面の説明から探して提案するローカルツール。
 
 - 作成日：2026-10-06
-- 状態：仕様確定（実装前）
+- 状態：実装済み（2026-10-07、PLAN.md のタスク1〜9が完了）
 
 ---
 
@@ -136,26 +136,32 @@
 ### 7.4 AIの応答JSON
 9.4を参照。
 
-### 7.5 ファイル構成（案）
+### 7.5 ファイル構成
 ```
 audio-finder/
-├─ SPEC.md
-├─ start.bat
+├─ README.md              … 使い方・インストール方法・動作環境
+├─ SPEC.md                … この仕様書
+├─ PLAN.md                … 実装の順番と進み具合
+├─ CLAUDE.md              … 作業ルール
+├─ start.bat              … 起動（初回は .venv の作成とインストールも）
 ├─ requirements.txt       … 動かす用（バージョン固定）
 ├─ requirements-dev.txt   … テスト用（バージョン固定）
 ├─ app/
+│  ├─ __main__.py      … `python -m app` で起動し、ブラウザを開く
 │  ├─ main.py          … FastAPI本体（APIと画面の配信）
+│  ├─ storage.py       … data/ のJSONの読み書き（一時ファイル→置き換え）
 │  ├─ scanner.py       … フォルダをスキャンして目録を作る
 │  ├─ ai.py            … claude -p の呼び出し・応答の検証
-│  └─ prompts/         … AIへの指示文
+│  └─ prompts/
+│     └─ search.md     … AIへの指示文
 ├─ static/             … HTML / CSS / JS
 ├─ tests/              … pytest のテスト
 ├─ mock/               … 確定したUIの見本（8章）
 └─ data/
-   ├─ config.json      … 設定
-   ├─ index.json       … 目録
-   ├─ history.json     … 検索履歴
-   └─ sites.json       … 誘導先サイトの一覧
+   ├─ config.json      … 設定（初回起動時に作られる。git管理外）
+   ├─ index.json       … 目録（git管理外）
+   ├─ history.json     … 検索履歴（git管理外）
+   └─ sites.json       … 誘導先サイトの一覧（git管理する）
 ```
 
 ## 8. 画面
@@ -261,7 +267,7 @@ audio-finder/
 | `roots[].id` | string | 変わらない短いID（例：`r_7f3a`）。表示名を変えても目録が壊れないようにするため |
 | `roots[].label` | string | 画面に出す名前 |
 | `roots[].path` | string | Windowsの絶対パス |
-| `roots[].enabled` | bool | 一時的に検索対象から外したいとき用 |
+| `roots[].enabled` | bool | 一時的に検索対象から外したいとき用。`false` にしたフォルダや登録から外したフォルダの素材は、再スキャン前で目録に残っていても検索の候補に出さない |
 | `roots[].added_at` | string | 追加した日時 |
 
 ```json
@@ -421,7 +427,7 @@ audio-finder/
 | 状況 | 動き |
 |---|---|
 | Claude Codeが入っていない／未ログイン | 赤い帯で「Claude Codeにログインしてください」と、その手順を表示 |
-| 利用枠の上限に達した | 「利用上限です」と表示。リセット時刻が分かればそれも表示 |
+| 利用枠の上限に達した | 「利用上限に達しました」と表示。リセット時刻が分かればそれも表示 |
 | AIの応答が60秒以内に返らない | 中断して「時間切れ」を表示し、再試行ボタンを出す |
 | AIの応答がJSONとして読めない | 1回だけ自動で再試行。それでもダメならエラー表示 |
 | 登録フォルダが見つからない（外付けドライブを外しているなど） | そのフォルダだけ飛ばして続行し、「○○が見つかりません」と注意表示 |

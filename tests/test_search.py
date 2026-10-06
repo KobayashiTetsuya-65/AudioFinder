@@ -258,6 +258,26 @@ def test_missing_root_is_skipped_and_reported(data_dir):
     assert body["missing_roots"] == [{"id": "r_2", "label": "Gone Pack", "path": str(gone)}]  # 無効のフォルダは注意しない
 
 
+def test_disabled_or_removed_root_is_excluded_before_rescan(data_dir):
+    ids = make_index(data_dir, 2)
+    # 目録を作ったあと、再スキャンせずに「r_2」を無効にし、「r_3」を登録から外した状態
+    config = storage.load_config(data_dir)
+    config["roots"].append({"id": "r_2", "label": "Off", "path": str(data_dir.parent / "Pack"), "enabled": False,
+                            "added_at": "2026-10-06T21:00:00+09:00"})
+    storage.save_json(data_dir / "config.json", config)
+    index = scanner.load_index(data_dir)
+    index["files"] += [{**index["files"][0], "id": "b00000000000", "root_id": "r_2"},
+                       {**index["files"][0], "id": "c00000000000", "root_id": "r_3"}]
+    scanner.save_index(data_dir, index)
+
+    runner = fake_claude({"conditions": CONDITIONS,
+                          "local": [{"id": "b00000000000"}, {"id": "c00000000000"}, {"id": ids[1]}]})
+    res = client_with(data_dir, runner).post("/api/search", json={"query": "ボス"})
+    assert res.status_code == 200
+    assert [t["id"] for t in res.json()["local"]] == [ids[1]]
+    assert "検索対象の登録フォルダ（root_id）：r_1\n" in runner.calls[0]["prompt"]  # AIにも対象を伝える
+
+
 def test_no_missing_roots(data_dir):
     ids = make_index(data_dir, 1)
     runner = fake_claude({"conditions": CONDITIONS, "local": [{"id": ids[0]}]})
