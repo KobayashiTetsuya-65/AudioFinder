@@ -3,6 +3,7 @@
 import ntpath
 import secrets
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import scanner, storage
+from app import ai, scanner, storage
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 JST = timezone(timedelta(hours=9))
@@ -23,6 +24,10 @@ class RootIn(BaseModel):
 
 class RootPatch(BaseModel):
     enabled: bool
+
+
+class SearchIn(BaseModel):
+    query: str = ""
 
 
 def _now_jst() -> str:
@@ -48,7 +53,8 @@ def _new_root_id(roots: list) -> str:
             return rid
 
 
-def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR) -> FastAPI:
+def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR, ai_runner=ai.run_claude) -> FastAPI:
+    """ai_runner：`claude -p` を呼ぶ関数。テストでは偽物を渡す。"""
     storage.load_config(data_dir)  # 初回は config.json を作る
     config_path = data_dir / "config.json"
     lock = threading.Lock()  # config.json の読み→書きが同時に走らないように
@@ -160,6 +166,43 @@ def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR) -> FastAPI:
         """進行状況と、最後にできた目録の要約。"""
         with scan_lock:
             return dict(scan_state)
+
+    # ---------- 探す（AI） ----------
+
+    @app.post("/api/search")
+    def search(body: SearchIn):
+        query = body.query.strip()
+        if not query:
+            raise HTTPException(400, "どんな場面の音を探すか入力してください")
+        with lock:
+            config = storage.load_config(data_dir)
+        index = scanner.load_index(data_dir)
+        if index is None:
+            raise HTTPException(409, "まだ目録がありません。設定画面でフォルダを登録して「再スキャン」してください")
+        files = {f["id"]: f for f in index["files"]}
+        labels = {r["id"]: r["label"] for r in config["roots"]}
+
+        started = time.monotonic()
+        try:
+            result = ai.search(query, data_dir, files.keys(), config["ai"]["timeout_sec"], ai_runner)
+        except ai.AIError as e:
+            raise HTTPException(502, str(e))
+        elapsed = round(time.monotonic() - started, 1)
+
+        # 画面に出す情報を目録から足す（AIが返すのはIDだけ）
+        local = []
+        for item in result["local"]:
+            f = files[item["id"]]
+            local.append({
+                "id": f["id"],
+                "filename": f["filename"],
+                "rel_path": f["rel_path"],
+                "root_label": labels.get(f["root_id"], f["root_id"]),
+                "duration_sec": f["duration_sec"],
+                "likely_bgm": f["likely_bgm"],
+                "readable": f["readable"],
+            })
+        return {"query": query, "elapsed_sec": elapsed, "conditions": result["conditions"], "local": local}
 
     # API より後に登録する（"/" 以下をすべて受けるため）
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
