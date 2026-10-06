@@ -14,6 +14,9 @@ from pathlib import Path
 from urllib.parse import quote
 
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "search.md"
+# APIキーを書く設定ファイル（.gitignore 済み）。AIの作業フォルダ（data/）の外なので、AIからは読めない
+ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+API_KEY_NAME = "ANTHROPIC_API_KEY"
 MAX_LOCAL = 10  # SPEC 4.2
 MAX_PER_SITE = 3  # SPEC 4.3
 
@@ -60,7 +63,7 @@ RESPONSE_SCHEMA = {
 class AIError(Exception):
     """AIを呼べなかった、または応答が使えなかった。メッセージはそのまま画面に出す（SPEC 10章）。
 
-    kind：画面の帯の出し分けに使う。"login"（未インストール・未ログイン）／"limit"（利用上限）／
+    kind：画面の帯の出し分けに使う。"login"（未インストール・APIキーが使えない・未ログイン）／"limit"（利用上限）／
     "timeout"（時間切れ。再試行ボタンを出す）／"invalid_json"（JSONとして読めない）／"error"（その他）
     hint：帯の下に小さく出す説明（手順など）。
     """
@@ -83,8 +86,9 @@ def timeout_error(timeout_sec: float) -> AIError:
     return AIError(f"時間切れ（{timeout_sec:g}秒以内に応答がありませんでした）", "timeout")
 
 
-LOGIN_MESSAGE = "Claude Code にログインしてください"
-LOGIN_HINT = "ターミナルで「claude」を起動してログインしてから、もう一度「探す」を押してください。"
+LOGIN_MESSAGE = "Claude Code の認証に失敗しました"
+LOGIN_HINT = (".env の ANTHROPIC_API_KEY が正しいか確認してから、もう一度「探す」を押してください。"
+              "（APIキーを使わず、ログイン中のアカウントで使う場合は、ターミナルで「claude」を起動してログインしてください）")
 JST = timezone(timedelta(hours=9))
 
 # claude -p のエラー文の見分け方。未ログインは実物で確認した（"Not logged in · Please run /login"）。
@@ -116,10 +120,15 @@ def error_from_claude(text: str, api_status=None) -> AIError:
     return AIError(f"AIがエラーを返しました：{text or '不明なエラー'}")
 
 
-def build_command(claude_path: str) -> list:
-    """`claude -p` のコマンドライン。フラグは公式ドキュメント（CLI reference / headless）で確認したもの。"""
+def build_command(claude_path: str, api_key: bool = False) -> list:
+    """`claude -p` のコマンドライン。フラグは公式ドキュメント（CLI reference / headless）で確認したもの。
+
+    api_key：.env のAPIキーで動かすとき True。--bare を付けると、ログイン情報（OAuth）は読まず、
+    ANTHROPIC_API_KEY だけで認証する（付けないと、ログイン済みのPCではAPIキーより利用枠が優先される）。
+    """
     return [
         claude_path, "-p",
+        *(["--bare"] if api_key else []),
         "--output-format", "json",
         "--json-schema", json.dumps(RESPONSE_SCHEMA),
         "--append-system-prompt-file", str(PROMPT_PATH),
@@ -136,21 +145,55 @@ def build_command(claude_path: str) -> list:
     ]
 
 
+def read_api_key(path: Path | None = None) -> str | None:
+    """.env から ANTHROPIC_API_KEY の値を読む。ファイルがない・書かれていない・空なら None。
+
+    書き方は「ANTHROPIC_API_KEY=sk-ant-...」。# で始まる行は無視し、値の前後の空白と引用符は外す。
+    path：読む .env。省略したら ENV_PATH。
+    """
+    path = path or ENV_PATH
+    if not path.is_file():
+        return None
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        if name.strip().removeprefix("export ").strip() == API_KEY_NAME:
+            value = value.strip().strip('"').strip("'").strip()
+            return value or None
+    return None
+
+
+def claude_env(api_key: str | None) -> dict:
+    """`claude -p` に渡す環境変数。APIキーがあれば ANTHROPIC_API_KEY として渡す（利用料は Claude Console のAPI側にかかる）。
+
+    無効なキーだと claude -p が再試行を続けて時間切れになるので、再試行は2回までにする（数秒で認証エラーが返る）。
+    """
+    env = os.environ.copy()
+    if api_key:
+        env[API_KEY_NAME] = api_key
+        env.setdefault("CLAUDE_CODE_MAX_RETRIES", "2")
+    return env
+
+
 def run_claude(prompt: str, cwd: Path, timeout_sec: float) -> str:
     """`claude -p` を子プロセスで1回呼び、標準出力（JSON）を返す。"""
     claude_path = shutil.which("claude")
     if claude_path is None:
-        raise AIError(LOGIN_MESSAGE, "login",
-                      "Claude Code が見つかりません。インストールしてから、" + LOGIN_HINT)
+        raise AIError("Claude Code が見つかりません", "login",
+                      "Claude Code をインストールしてから、もう一度「探す」を押してください。")
+    api_key = read_api_key()
     try:
         proc = subprocess.run(
-            build_command(claude_path),
+            build_command(claude_path, api_key=bool(api_key)),
             input=prompt,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             cwd=cwd,
+            env=claude_env(api_key),
             timeout=timeout_sec,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,  # 黒い窓を出さない
         )

@@ -13,7 +13,7 @@ Python 3.12+ / FastAPI + uvicorn / mutagen / 画面は素のHTML・CSS・JS（�
 
 ## 実行方法
 - `start.bat` をダブルクリック（初回は `.venv` 作成と依存のインストールも行う）→ `http://127.0.0.1:8765` が開く
-- 前提：Python 3.12以上と、ログイン済みの Claude Code
+- 前提：Python 3.12以上と Claude Code。`.env` に `ANTHROPIC_API_KEY` があればAPIキーで、なければログイン中のアカウントで動く（設定方法は README.md）
 
 ## テスト方法
 - 自動：初回だけ `.venv\Scripts\python -m pip install -r requirements-dev.txt`、その後 `.venv\Scripts\python -m pytest`（`claude -p` は偽物に差し替える。本物は呼ばない）
