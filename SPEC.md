@@ -67,7 +67,7 @@
 - サーバーから **`claude -p`（Claude Codeのヘッドレスモード）を子プロセスとして呼ぶ**。出力形式はJSON（`--output-format json`）
 - 今ログインしているClaude Codeのアカウントの**利用枠で動く**（API用の別会計・APIキーは使わない）
 - 前提：PCにClaude Codeが入っていて、ログイン済みであること
-- まずは**検索のたびに毎回起動**する。遅いと感じたら、Agent SDKでセッションをつなぎっぱなしにする方式へ切り替えを検討する（7.4参照）
+- まずは**検索のたびに毎回起動**する。遅いと感じたら、Agent SDKでセッションをつなぎっぱなしにする方式へ切り替えを検討する（11章「将来の拡張候補」参照）
 
 ### 6.2 目録の検索方法
 - `claude -p` には**読み取り専用の道具（ファイルを読む・文字列を検索する・ファイルを一覧する）だけを許可**する。書き込みやコマンド実行は禁止する
@@ -76,53 +76,58 @@
 - 許可する道具を指定する具体的なフラグは、実装時に公式ドキュメントで確認する
 
 ### 6.3 AIに守らせること（プロンプトの制約）
-- 返すのは決められたJSONだけにする（7.3参照）
+- 返すのは決められたJSONだけにする（9.4参照）
 - ローカル候補は、`index.json` に**実在するIDだけ**を返す
-- サイトのリンクは、**`sites.json` に載っているURLとURLの型からだけ**作る（存在しないURLを作らせない）
+- **サイトはURLを返さない**。`sites.json` の `site_id` と、カテゴリID（`category_id`）か検索語（`q`）だけを返す。URLはサーバーが組み立てる（存在しないURLが構造的に出ない）
+- `sites.json` の `kinds` に合わないサイト（SEを探しているのにBGM専門のサイトなど）は選ばない
 - 音源データそのものは扱わない（渡すのはファイル名やフォルダ名などの文字情報だけ）
 
 ### 6.4 サーバー側での検証
 - 返ってきたローカル候補のIDが目録にないものは捨てる
-- 返ってきたリンクのうち、`sites.json` のどのサイトのURLにも当てはまらないものは捨てる
-- 応答がJSONとして読めなければ、**1回だけ自動で再試行**する（8章参照）
+- `site_id` や `category_id` が `sites.json` にないもの、`search_url` が `null` のサイトへの検索案内は捨てる
+- 応答がJSONとして読めなければ、**1回だけ自動で再試行**する（10章参照）
 
 ## 7. 技術構成
 
 ### 7.1 構成
 | 部分 | 採用するもの |
 |---|---|
-| サーバー | Python + FastAPI（uvicorn） |
+| 言語 | **Python 3.12以上** |
+| サーバー | FastAPI ＋ uvicorn |
 | 音声ファイルの情報読み取り | mutagen |
-| 画面 | 素のHTML・CSS・JavaScript（ビルド作業なし） |
+| 画面 | 素のHTML・CSS・JavaScript（ビルド作業なし、外部ライブラリなし） |
 | AI | `claude -p`（子プロセス） |
+| テスト | pytest（FastAPIの TestClient を使う） |
+| 依存の管理 | `requirements.txt` ＋ 仮想環境 `.venv` |
 | 待ち受け | **`127.0.0.1:8765`**（自分のPCの中からしか開けない。ポートは `config.json` で変更可） |
 
-### 7.2 起動
-- **`start.bat` をダブルクリック**すると、サーバーが立ち上がってブラウザが自動で開く
+前提：PCにPython 3.12以上と、ログイン済みのClaude Codeが入っていること（2026-10-06時点ではPython未インストール）。
+
+#### 選定の経緯
+次の3つを比べた。条件は「ブラウザで動く、使いやすさ重視」。
+
+| 候補 | 判断 |
+|---|---|
+| **Python ＋ FastAPI ＋ 素のHTML/JS** | **採用**。コードが最も少なく、音声の長さ読み取りがmutagen 1つで済み、ビルド作業もない |
+| C# ＋ Blazor Server | C#だけで書けるのが利点。比較したうえで不採用 |
+| TypeScript ＋ React ＋ Node.js | 新しく覚えることが多すぎ、自分専用の小さなツールには大げさなので不採用 |
+
+### 7.2 テスト方針
+- **自動テスト（pytest）**：画面を通さずに確かめられる処理が対象。単語への分解（`words`）、ID生成、目録の作成、AIの応答の検証、URLの組み立て、履歴の50件上限、各エラーのときの動き
+- `claude -p` は自動テストでは**呼ばない**。決まった応答を返す偽物に差し替えてテストする
+- **手動確認**：画面の操作、試聴、エクスプローラーで開く、本物の `claude -p` との接続は、`start.bat` で起動して実際に操作して確かめる
+
+### 7.3 起動
+- **`start.bat` をダブルクリック**すると、次の順に動く
+  1. `.venv` がなければ作り、`requirements.txt` の中身をインストールする（初回だけ）
+  2. サーバーを立ち上げ、ブラウザで `http://127.0.0.1:8765` を開く
 - 終了はコンソールウィンドウを閉じる
 - 常駐・自動起動はしない
 
-### 7.3 AIの応答JSON（案）
-```json
-{
-  "conditions": {
-    "kind": "BGM",
-    "mood": ["緊迫"],
-    "genre": ["オーケストラ"],
-    "tempo": "速め",
-    "loop": true,
-    "keywords": ["battle", "boss", "epic", "戦闘"]
-  },
-  "local": [ { "id": "a1b2c3" } ],
-  "sites": [
-    { "site_id": "maou", "label": "BGM > 戦闘", "url": "https://maou.audio/..." }
-  ]
-}
-```
-- `kind` は `BGM` / `SE` / `環境音` のどれか
-- `local` は最大10件、`sites` は各サイト1〜3件
+### 7.4 AIの応答JSON
+9.4を参照。
 
-### 7.4 ファイル構成（案）
+### 7.5 ファイル構成（案）
 ```
 audio-finder/
 ├─ SPEC.md
@@ -134,6 +139,7 @@ audio-finder/
 │  ├─ ai.py            … claude -p の呼び出し・応答の検証
 │  └─ prompts/         … AIへの指示文
 ├─ static/             … HTML / CSS / JS
+├─ tests/              … pytest のテスト
 └─ data/
    ├─ config.json      … 設定
    ├─ index.json       … 目録
@@ -147,7 +153,7 @@ audio-finder/
 - 場面説明の入力欄と「探す」ボタン
 - 検索中の表示（経過秒数つき）
 - 結果の3ブロック（4章）
-- エラーは画面上部に帯で表示（9章）
+- エラーは画面上部に帯で表示（10章）
 
 ### 8.2 設定画面
 - 検索対象フォルダの一覧と、追加・削除。追加は**パスを文字で入力**する（ブラウザのフォルダ選択では絶対パスが取れないため）
@@ -156,19 +162,195 @@ audio-finder/
 ### 8.3 履歴
 - 直近50件の場面説明を一覧で表示する
 - クリックすると、**AIを呼ばずに**そのときの結果を再表示する
+- 今の目録にないファイルは「見つかりません」と表示し、試聴ボタンを無効にする
 
-## 9. 保存
+## 9. 保存とデータ構造
 
 すべて `data/` 内のJSONファイルに保存する。中身はテキストなので、壊れたときは手で直せる。
 
-| ファイル | 中身 |
-|---|---|
-| `config.json` | 検索対象フォルダの一覧、ポート番号、タイムアウト秒数（初期値60） |
-| `index.json` | 目録。1ファイルごとに `id`（パスから作るハッシュ）、`root`（どの登録フォルダか）、`rel_path`、`filename`、`ext`、`duration_sec`、`size`、`likely_bgm`（**30秒以上なら true**）、`mtime`。最後にスキャンした日時も持つ |
-| `history.json` | 直近**50件**。入力文、日時、そのときの結果のJSON。古いものから消す |
-| `sites.json` | サイトごとに `site_id`、名前、トップURL、検索URLの型（例：`https://opentracks.com/search?keywords={q}`）、主なカテゴリページ（名前とURL）。**手で編集する**（編集画面は作らない） |
+| ファイル | 中身 | 書き込むのは |
+|---|---|---|
+| `config.json` | 設定 | 設定画面（手で編集してもよい） |
+| `index.json` | 目録 | 再スキャン |
+| `history.json` | 直近50件の検索履歴 | 検索が成功したとき |
+| `sites.json` | 誘導先サイトの一覧 | **手で編集のみ**（編集画面は作らない） |
 
 - お気に入り・採用管理は持たない
+
+### 9.1 共通ルール
+- 文字コードはUTF-8。各ファイルの先頭に `"version": 1` を持たせる（将来データの形を変えるときの目印）
+- 日時はISO 8601形式で日本時間（例：`2026-10-06T21:30:00+09:00`）
+- 項目名は英語の小文字とアンダースコア。選択肢になる値（`bgm` / `se` など）も英語で持ち、画面に出すときに日本語へ変換する
+- 書き込みは、一時ファイルに書いてから置き換える（書いている途中で落ちてもファイルが壊れないように）
+
+### 9.2 `config.json`（設定）
+
+| 項目 | 型 | 説明 |
+|---|---|---|
+| `server.host` / `server.port` | string / int | `127.0.0.1` / `8765` |
+| `ai.timeout_sec` | int | AIの応答を待つ秒数（60） |
+| `ai.retry_on_invalid_json` | int | 応答がJSONとして読めないときの再試行回数（1） |
+| `scan.extensions` | string[] | 目録に入れる形式 |
+| `scan.bgm_threshold_sec` | number | この秒数以上ならBGM候補の印をつける（30） |
+| `history.max_entries` | int | 履歴の最大件数（50） |
+| `roots[]` | object[] | 検索対象フォルダ |
+| `roots[].id` | string | 変わらない短いID（例：`r_7f3a`）。表示名を変えても目録が壊れないようにするため |
+| `roots[].label` | string | 画面に出す名前 |
+| `roots[].path` | string | Windowsの絶対パス |
+| `roots[].enabled` | bool | 一時的に検索対象から外したいとき用 |
+| `roots[].added_at` | string | 追加した日時 |
+
+```json
+{
+  "version": 1,
+  "server": { "host": "127.0.0.1", "port": 8765 },
+  "ai": { "timeout_sec": 60, "retry_on_invalid_json": 1 },
+  "scan": { "extensions": [".wav", ".mp3", ".ogg"], "bgm_threshold_sec": 30 },
+  "history": { "max_entries": 50 },
+  "roots": [
+    {
+      "id": "r_7f3a",
+      "label": "Fantasy RPG Music Pack",
+      "path": "D:\\GameAssets\\Audio\\FantasyRPG",
+      "enabled": true,
+      "added_at": "2026-10-06T21:00:00+09:00"
+    }
+  ]
+}
+```
+
+### 9.3 `index.json`（目録）
+
+| 項目 | 型 | 説明 |
+|---|---|---|
+| `scanned_at` | string | 最後にスキャンした日時 |
+| `roots[]` | object[] | スキャンしたときの各フォルダの状態（`id`、`status`：`ok` か `missing`、`file_count`） |
+| `files[].id` | string | `root_id` と `rel_path` から作るハッシュの先頭12文字。再スキャンしても同じファイルなら同じIDになる |
+| `files[].root_id` | string | どの登録フォルダのファイルか |
+| `files[].rel_path` | string | 登録フォルダからの相対パス。区切りは `/` |
+| `files[].filename` | string | ファイル名 |
+| `files[].folder` | string | 親フォルダの相対パス（ルート直下なら `""`） |
+| `files[].ext` | string | `wav` / `mp3` / `ogg` |
+| `files[].duration_sec` | number \| null | 長さ（秒、小数1桁）。読めなければ `null` |
+| `files[].likely_bgm` | bool \| null | 長さが `bgm_threshold_sec` 以上なら `true`。長さが分からなければ `null` |
+| `files[].size_bytes` | int | ファイルサイズ |
+| `files[].mtime` | string | 最終更新日時 |
+| `files[].readable` | bool | 長さを読めたかどうか。`false` なら試聴ボタンを無効にする |
+| `files[].words` | string | 検索用の単語の並び（下記） |
+
+- **`files` は1件を1行で書き出す**。AIは文字列検索で目録を探すので（6.2）、検索に当たった1行だけで、そのファイルの情報がすべて手に入るようにする。この書き方でもJSONとして正しい
+- **`words`**：登録フォルダの表示名と `rel_path` を、区切り文字（`/` `_` `-` 空白など）、大文字の切れ目、数字の切れ目で単語に分解し、小文字にして空白でつなげたもの。拡張子は含めない。`Boss_Theme_Loop` や `CardDraw01` を「boss」「card draw」で検索して当たるようにするため
+
+```json
+{
+  "version": 1,
+  "scanned_at": "2026-10-06T21:30:00+09:00",
+  "roots": [ { "id": "r_7f3a", "status": "ok", "file_count": 2 } ],
+  "files": [
+{"id":"3f9a1c2e7b04","root_id":"r_7f3a","rel_path":"Battle/Boss_Theme_Loop.ogg","filename":"Boss_Theme_Loop.ogg","folder":"Battle","ext":"ogg","duration_sec":95.4,"likely_bgm":true,"size_bytes":1843200,"mtime":"2025-03-02T10:15:00+09:00","readable":true,"words":"fantasy rpg music pack battle boss theme loop"},
+{"id":"b81d04f9c2aa","root_id":"r_7f3a","rel_path":"SE/UI/CardDraw01.wav","filename":"CardDraw01.wav","folder":"SE/UI","ext":"wav","duration_sec":0.6,"likely_bgm":false,"size_bytes":52920,"mtime":"2025-03-02T10:15:00+09:00","readable":true,"words":"fantasy rpg music pack se ui card draw 01"}
+  ]
+}
+```
+
+### 9.4 AIの応答（`claude -p` が返すJSON）
+
+| 項目 | 型 | 説明 |
+|---|---|---|
+| `conditions.kind` | `"bgm"` \| `"se"` \| `"ambient"` | 種類 |
+| `conditions.mood` | string[] | 雰囲気（日本語。例：`["緊迫", "壮大"]`） |
+| `conditions.genre` | string[] | ジャンル（日本語） |
+| `conditions.tempo` | `"slow"` \| `"medium"` \| `"fast"` \| null | テンポ。SEなどで関係なければ `null` |
+| `conditions.loop` | bool \| null | ループ前提かどうか |
+| `local[]` | object[] | 最大10件。`{ "id": "..." }` |
+| `sites[]` | object[] | 各サイト1〜3件 |
+| `sites[].site_id` | string | `sites.json` のID |
+| `sites[].type` | `"category"` \| `"search"` | カテゴリページへの案内か、サイト内検索への案内か |
+| `sites[].category_id` | string | `type` が `category` のとき。`sites.json` のカテゴリID |
+| `sites[].q` | string | `type` が `search` のときの検索語 |
+
+- **URLは含めない**。サーバーが `sites.json` から組み立てる（6.3、6.4）
+
+```json
+{
+  "conditions": { "kind": "bgm", "mood": ["緊迫", "壮大"], "genre": ["オーケストラ"], "tempo": "fast", "loop": true },
+  "local": [ { "id": "3f9a1c2e7b04" } ],
+  "sites": [
+    { "site_id": "maou", "type": "category", "category_id": "bgm_battle" },
+    { "site_id": "opentracks", "type": "search", "q": "ボス 戦闘" }
+  ]
+}
+```
+
+### 9.5 `history.json`（履歴）
+
+| 項目 | 型 | 説明 |
+|---|---|---|
+| `entries[]` | object[] | 新しい順。`max_entries` を超えたら最も古いものから消す |
+| `entries[].id` | string | 例：`h_20261006213012` |
+| `entries[].created_at` | string | 検索した日時 |
+| `entries[].query` | string | 入力した場面説明 |
+| `entries[].elapsed_sec` | number | AIの応答にかかった秒数 |
+| `entries[].conditions` | object | 9.4と同じ形 |
+| `entries[].local[]` | object[] | `id` に加えて、`filename`・`rel_path`・`root_label`・`duration_sec` の**写し** |
+| `entries[].sites[]` | object[] | `site_id`、`site_name`、`label`（例：「BGM > 戦闘」「検索：ボス 戦闘」）、組み立て済みの `url` |
+
+- 写しを残すのは、再スキャンや `sites.json` の編集のあとでも過去の結果を読めるようにするため
+- **エラーになった検索は残さない**
+
+```json
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "h_20261006213012",
+      "created_at": "2026-10-06T21:30:12+09:00",
+      "query": "ボス戦、緊迫感あり、オーケストラ系、ループ前提",
+      "elapsed_sec": 12.3,
+      "conditions": { "kind": "bgm", "mood": ["緊迫", "壮大"], "genre": ["オーケストラ"], "tempo": "fast", "loop": true },
+      "local": [
+        { "id": "3f9a1c2e7b04", "filename": "Boss_Theme_Loop.ogg", "rel_path": "Battle/Boss_Theme_Loop.ogg", "root_label": "Fantasy RPG Music Pack", "duration_sec": 95.4 }
+      ],
+      "sites": [
+        { "site_id": "maou", "site_name": "魔王魂", "label": "BGM > 戦闘", "url": "https://maou.audio/..." }
+      ]
+    }
+  ]
+}
+```
+
+### 9.6 `sites.json`（誘導先サイト、手で編集する）
+
+| 項目 | 型 | 説明 |
+|---|---|---|
+| `sites[].id` | string | `maou` / `soundeffect_lab` / `opentracks` |
+| `sites[].name` | string | 表示名 |
+| `sites[].top_url` | string | トップページのURL |
+| `sites[].search_url` | string \| null | 検索URLの型。`{q}` に検索語（URLエンコード済み）が入る。サイト内検索がなければ `null` |
+| `sites[].kinds` | string[] | このサイトで扱う種類（`bgm` / `se` / `ambient`） |
+| `sites[].categories[]` | object[] | `id`、`name`、`kind`、`url` |
+| `sites[].note` | string | AIへの補足（例：「ジャンル別のカテゴリが細かい」） |
+
+```json
+{
+  "version": 1,
+  "sites": [
+    {
+      "id": "maou",
+      "name": "魔王魂",
+      "top_url": "https://maou.audio/",
+      "search_url": "https://maou.audio/?s={q}",
+      "kinds": ["bgm", "se"],
+      "categories": [
+        { "id": "bgm_battle", "name": "BGM > 戦闘", "kind": "bgm", "url": "https://maou.audio/..." }
+      ],
+      "note": ""
+    }
+  ]
+}
+```
+
+- `search_url` とカテゴリの `url` はサンプル。**実際のURLは実装時に各サイトを見て確認して書き込む**
 
 ## 10. エラー時の動き
 
@@ -256,3 +438,5 @@ audio-finder/
 | Q14 | サイト一覧 | `sites.json` を手で編集する |
 | Q15 | やらないこと | 11章の13項目 |
 | Q16 | 起動 | `start.bat` をダブルクリック |
+| 追加 | 技術スタックの再検討 | 3候補を比べたうえでPython ＋ FastAPI ＋ 素のHTML/JSのまま（7.1） |
+| 追加 | データ構造 | 9章のとおり。目録は1件1行、AIにURLを作らせない、履歴に写しを残す |
