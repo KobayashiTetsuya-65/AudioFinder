@@ -66,7 +66,7 @@ def test_search_returns_conditions_and_local(data_dir):
     # 作業フォルダは data/、待ち時間は config の値、場面説明がAIに渡る
     call = runner.calls[0]
     assert call["cwd"] == data_dir
-    assert call["timeout_sec"] == 60
+    assert 59 < call["timeout_sec"] <= 60  # 開始からの残り時間（再試行を含めた合計で60秒）
     assert "ボス戦、緊迫感" in call["prompt"]
 
 
@@ -227,6 +227,65 @@ def test_broken_json_twice_is_error(data_dir):
     assert len(runner.calls) == 2  # 再試行は1回だけ
     assert body["error"]["kind"] == "invalid_json"
     assert "JSON" in body["detail"]
+
+
+def fake_clock(monkeypatch):
+    """time.monotonic を、advance(秒) で進める偽物の時計に置き換える。"""
+    now = [1000.0]
+    monkeypatch.setattr(ai.time, "monotonic", lambda: now[0])
+
+    def advance(sec):
+        now[0] += sec
+
+    return advance
+
+
+def test_retry_uses_only_the_remaining_time(data_dir, monkeypatch):
+    """壊れたJSONの再試行は、最初の呼び出しの残り時間で行う（合計が timeout_sec を超えない）。"""
+    ids = make_index(data_dir, 1)
+    advance = fake_clock(monkeypatch)
+    good = json.dumps({"type": "result", "is_error": False, "result": "",
+                       "structured_output": {"conditions": CONDITIONS, "local": [{"id": ids[0]}]}})
+    timeouts = []
+
+    def runner(prompt, cwd, timeout_sec):
+        timeouts.append(timeout_sec)
+        advance(45)
+        return "これはJSONではない" if len(timeouts) == 1 else good
+
+    res = client_with(data_dir, runner).post("/api/search", json={"query": "ボス"})
+    assert res.status_code == 200
+    assert timeouts == [60, 15]
+
+
+def test_retry_timeout_shows_configured_seconds(data_dir, monkeypatch):
+    advance = fake_clock(monkeypatch)
+    calls = []
+
+    def runner(prompt, cwd, timeout_sec):
+        calls.append(timeout_sec)
+        if len(calls) == 1:
+            advance(45)
+            return "これはJSONではない"
+        raise ai.timeout_error(timeout_sec)  # 残りの15秒でも返らなかった
+
+    body = search_error(data_dir, runner)
+    assert body["error"]["kind"] == "timeout"
+    assert body["detail"] == "時間切れ（60秒以内に応答がありませんでした）"  # 残りの15秒ではなく設定の秒数
+
+
+def test_no_retry_when_time_is_used_up(data_dir, monkeypatch):
+    advance = fake_clock(monkeypatch)
+    calls = []
+
+    def runner(prompt, cwd, timeout_sec):
+        calls.append(timeout_sec)
+        advance(60)
+        return "これはJSONではない"
+
+    body = search_error(data_dir, runner)
+    assert len(calls) == 1
+    assert body["error"]["kind"] == "timeout"
 
 
 def test_other_errors_are_not_retried(data_dir):

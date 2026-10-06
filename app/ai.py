@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -76,6 +77,10 @@ class InvalidJSON(AIError):
     def __init__(self):
         super().__init__("AIの応答をJSONとして読み取れませんでした", "invalid_json",
                          "自動で再試行しましたが読み取れませんでした。もう一度「探す」を押してください。")
+
+
+def timeout_error(timeout_sec: float) -> AIError:
+    return AIError(f"時間切れ（{timeout_sec:g}秒以内に応答がありませんでした）", "timeout")
 
 
 LOGIN_MESSAGE = "Claude Code にログインしてください"
@@ -150,7 +155,7 @@ def run_claude(prompt: str, cwd: Path, timeout_sec: float) -> str:
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,  # 黒い窓を出さない
         )
     except subprocess.TimeoutExpired:
-        raise AIError(f"時間切れ（{timeout_sec:g}秒以内に応答がありませんでした）", "timeout")
+        raise timeout_error(timeout_sec)
     if not proc.stdout.strip():
         err = error_from_claude(proc.stderr)
         if err.kind == "error":
@@ -274,6 +279,7 @@ def search(query: str, data_dir: Path, known_ids, timeout_sec: float, runner=run
            retries: int = 1, root_ids=None) -> dict:
     """場面の説明から、条件・ローカル候補・サイトへの案内を返す。作業フォルダは data/（AIはそこの index.json を検索する）。
 
+    timeout_sec：待つ時間の上限。再試行した分も含めた合計にかける（呼び直すたびに上限が延びないように）。
     retries：応答がJSONとして読めなかったときに自動で呼び直す回数（config の ai.retry_on_invalid_json）。
     root_ids：候補にしてよい登録フォルダの root_id。目録には無効にしたフォルダの行も残っていることがあるので、AIに伝える。
     """
@@ -281,11 +287,19 @@ def search(query: str, data_dir: Path, known_ids, timeout_sec: float, runner=run
     if root_ids is not None:
         prompt += f"検索対象の登録フォルダ（root_id）：{', '.join(root_ids) or 'なし'}\n\n"
     prompt += f"誘導先サイトの一覧：\n{sites_for_prompt(list(sites))}"
+    deadline = time.monotonic() + timeout_sec
     for attempt in range(retries + 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:  # 1回目で時間を使い切ったので、再試行はしない
+            raise timeout_error(timeout_sec)
         try:
-            answer = _parse_answer(runner(prompt, data_dir, timeout_sec))
+            answer = _parse_answer(runner(prompt, data_dir, remaining))
             break
         except InvalidJSON:
             if attempt >= retries:
                 raise
+        except AIError as e:
+            if e.kind == "timeout":  # 残り時間で呼んだときも、帯には設定した秒数を出す
+                raise timeout_error(timeout_sec) from None
+            raise
     return validate(answer, known_ids, sites)
