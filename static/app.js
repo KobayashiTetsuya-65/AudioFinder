@@ -57,19 +57,21 @@ function badge(likelyBgm) {
   return `<span class="badge unk">?</span>`;
 }
 
+// t.missing（履歴だけ）：今の目録にないファイル。名前に取り消し線を引き、▶と📂を無効にする
 function tracksHtml(tracks) {
   const rows = tracks.map((t, i) => `
-    <li class="track" data-id="${esc(t.id)}">
+    <li class="track ${t.missing ? "missing" : ""}" data-id="${esc(t.id)}">
       <span class="rank num">${i + 1}</span>
-      <button type="button" class="icon-btn play" title="試聴" ${t.readable ? "" : "disabled"}>▶</button>
+      <button type="button" class="icon-btn play" title="試聴" ${t.readable && !t.missing ? "" : "disabled"}>▶</button>
       <div class="info">
         <div class="name">${esc(t.filename)}</div>
         <div class="path">${esc(t.root_label)} / ${esc(t.rel_path)}</div>
-        ${t.readable ? "" : `<div class="note">このファイルは再生できません</div>`}
+        ${t.missing ? `<div class="note">見つかりません（今の目録にありません）</div>` : ""}
+        ${!t.missing && !t.readable ? `<div class="note">このファイルは再生できません</div>` : ""}
       </div>
       ${badge(t.likely_bgm)}
       <span class="dur num">${fmtDur(t.duration_sec)}</span>
-      <button type="button" class="icon-btn folder" title="エクスプローラーで開く">📂</button>
+      <button type="button" class="icon-btn folder" title="エクスプローラーで開く" ${t.missing ? "disabled" : ""}>📂</button>
     </li>`).join("");
   return `<div class="win"><div class="win-title">手持ちの素材 <span class="sub">${tracks.length}件</span></div><ul class="tracks">${rows}</ul></div>`;
 }
@@ -171,18 +173,27 @@ const EMPTY_HTML = `<div class="win empty"><div class="big">該当なし</div><p
   <li>英語で書く（例：「boss battle, epic」）</li>
   <li>近い場面に言い換える（例：「強敵との戦闘」）</li></ul></div>`;
 
-// 結果は書き直されるので、一覧の外側で受ける
-$("#search-body").addEventListener("click", (ev) => {
-  if (ev.target.closest("button.retry")) {
-    if (lastQuery !== null) runSearch(lastQuery);
-    return;
-  }
+// 候補の行の▶と📂。結果は書き直されるので、一覧の外側（探す・履歴の結果の枠）で受ける
+function onTrackClick(ev) {
   const btn = ev.target.closest("button.icon-btn");
   const row = btn && btn.closest(".track[data-id]");
   if (!row || btn.disabled) return;
   if (btn.classList.contains("play")) togglePlay(btn, row);
   else if (btn.classList.contains("folder")) reveal(row);
+}
+
+$("#search-body").addEventListener("click", (ev) => {
+  if (ev.target.closest("button.retry")) {
+    if (lastQuery !== null) runSearch(lastQuery);
+    return;
+  }
+  onTrackClick(ev);
 });
+
+// 結果の3ブロック（探す・履歴で共通）。0件のときは「読み取った条件」の下に「該当なし」と言い換えの例。サイトの案内はあれば続けて出す
+function resultsHtml(r) {
+  return conditionsHtml(r.conditions) + (r.local.length ? tracksHtml(r.local) : EMPTY_HTML) + sitesHtml(r.sites);
+}
 
 let searchTimer = null;
 
@@ -208,9 +219,7 @@ async function runSearch(query) {
   showSearching();
   try {
     const r = await api("POST", "/api/search", { query });
-    // 0件のときは「読み取った条件」の下に「該当なし」と言い換えの例。サイトの案内はあれば続けて出す
-    const local = r.local.length ? tracksHtml(r.local) : EMPTY_HTML;
-    body.innerHTML = missingRootsHtml(r.missing_roots) + conditionsHtml(r.conditions) + local + sitesHtml(r.sites);
+    body.innerHTML = missingRootsHtml(r.missing_roots) + resultsHtml(r);
   } catch (e) {
     body.innerHTML = errorBandHtml(e);
   } finally {
@@ -223,6 +232,55 @@ $("#quest").addEventListener("submit", (ev) => {
   ev.preventDefault();
   runSearch(ev.target.elements.query.value);
 });
+
+/* ---------- 履歴（SPEC 8.3） ---------- */
+
+let historyEntries = [];
+let historySelected = null;
+
+// 履歴画面を開くたびに読み直す（保存された結果を出すだけで、AIは呼ばない）
+async function loadHistory() {
+  try {
+    const { entries } = await api("GET", "/api/history");
+    historyEntries = entries;
+  } catch (e) {
+    historyEntries = [];
+    $("#hist-list").innerHTML = "";
+    $("#hist-detail").innerHTML = bandHtml("error", "✖", e.message);
+    return;
+  }
+  if (!historyEntries.some((e) => e.id === historySelected)) historySelected = historyEntries.length ? historyEntries[0].id : null;
+  renderHistory();
+}
+
+function renderHistory() {
+  if (historyEntries.length === 0) {
+    $("#hist-list").innerHTML = `<li class="hint">まだ履歴がありません。「探す」で検索すると、ここに残ります。</li>`;
+    $("#hist-detail").innerHTML = "";
+    return;
+  }
+  $("#hist-list").innerHTML = historyEntries.map((e) => `
+    <li data-id="${esc(e.id)}" class="${e.id === historySelected ? "active" : ""}">
+      <div class="q">${esc(e.query)}</div>
+      <div class="meta num">${fmtDate(e.created_at)}　${KIND[e.conditions.kind]}　${e.elapsed_sec}秒</div>
+    </li>`).join("");
+  const e = historyEntries.find((x) => x.id === historySelected);
+  if (playingBtn && $("#hist-detail").contains(playingBtn)) stopPlaying(); // 書き直すと▶ボタンが消えるので、先に止める
+  $("#hist-detail").innerHTML =
+    `<div class="hist-head"><span class="q">${esc(e.query)}</span><span class="num">${fmtDate(e.created_at)}</span>　保存された結果を表示中（AIは呼びません）</div>` +
+    resultsHtml(e);
+}
+
+$("#hist-list").addEventListener("click", (ev) => {
+  const li = ev.target.closest("li[data-id]");
+  if (!li || li.dataset.id === historySelected) return;
+  historySelected = li.dataset.id;
+  renderHistory();
+});
+
+$("#hist-detail").addEventListener("click", onTrackClick);
+
+document.querySelector('nav button[data-screen="history"]').addEventListener("click", loadHistory);
 
 /* ---------- 設定：検索対象フォルダ ---------- */
 

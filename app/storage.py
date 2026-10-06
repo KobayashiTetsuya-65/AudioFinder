@@ -52,6 +52,21 @@ def load_sites(data_dir: Path = DEFAULT_DATA_DIR) -> list:
     return load_json(path)["sites"]
 
 
+def load_history(data_dir: Path = DEFAULT_DATA_DIR) -> dict:
+    """history.json（検索履歴、SPEC 9.5）を読む。なければ空の履歴を返す（ファイルを作るのは最初に保存するとき）。"""
+    path = data_dir / "history.json"
+    if not path.exists():
+        return {"version": 1, "entries": []}
+    return load_json(path)
+
+
+def add_history(data_dir: Path, entry: dict, max_entries: int) -> None:
+    """履歴の先頭（新しい順）に1件足し、max_entries を超えた分は最も古いものから消す。"""
+    history = load_history(data_dir)
+    history["entries"] = [entry, *history["entries"]][:max_entries]
+    save_json(data_dir / "history.json", history)
+
+
 def load_config(data_dir: Path = DEFAULT_DATA_DIR) -> dict:
     """config.json を読む。なければ初期値で作ってから返す。"""
     path = data_dir / "config.json"

@@ -71,6 +71,7 @@ def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR, ai_runner=ai.run_claud
     storage.load_config(data_dir)  # 初回は config.json を作る
     config_path = data_dir / "config.json"
     lock = threading.Lock()  # config.json の読み→書きが同時に走らないように
+    history_lock = threading.Lock()  # history.json も同じ理由で
 
     app = FastAPI(title="Audio Finder")
 
@@ -200,6 +201,7 @@ def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR, ai_runner=ai.run_claud
         missing_ids = {r["id"] for r in missing}
         known_ids = {fid for fid, f in files.items() if f["root_id"] not in missing_ids}
 
+        searched_at = datetime.now(JST)
         started = time.monotonic()
         try:
             result = ai.search(query, data_dir, known_ids, config["ai"]["timeout_sec"], ai_runner,
@@ -222,9 +224,48 @@ def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR, ai_runner=ai.run_claud
                 "likely_bgm": f["likely_bgm"],
                 "readable": f["readable"],
             })
+
+        # 成功した検索だけ履歴に残す（SPEC 9.5）。再スキャンや sites.json の編集のあとでも読めるよう、表示に使う値の写しを持つ
+        copy_keys = ("id", "filename", "rel_path", "root_label", "duration_sec")
+        with history_lock:
+            used = {e["id"] for e in storage.load_history(data_dir)["entries"]}
+            hid = "h_" + searched_at.strftime("%Y%m%d%H%M%S")
+            n = 2
+            while hid in used:  # 同じ秒に2回探したとき
+                hid = f"h_{searched_at:%Y%m%d%H%M%S}_{n}"
+                n += 1
+            storage.add_history(data_dir, {
+                "id": hid,
+                "created_at": searched_at.isoformat(timespec="seconds"),
+                "query": query,
+                "elapsed_sec": elapsed,
+                "conditions": result["conditions"],
+                "local": [{k: t[k] for k in copy_keys} for t in local],
+                "sites": result["sites"],
+            }, config["history"]["max_entries"])
+
         return {"query": query, "elapsed_sec": elapsed, "conditions": result["conditions"], "local": local,
                 "sites": result["sites"],
                 "missing_roots": [{"id": r["id"], "label": r["label"], "path": r["path"]} for r in missing]}
+
+    # ---------- 履歴 ----------
+
+    @app.get("/api/history")
+    def history():
+        """保存された結果を返す（AIは呼ばない）。
+
+        手持ちの素材には今の目録の状態を足す：BGM/SEの印・再生できるか、今の目録にないなら missing。
+        """
+        with history_lock:
+            entries = storage.load_history(data_dir)["entries"]
+        index = scanner.load_index(data_dir)
+        files = {f["id"]: f for f in index["files"]} if index else {}
+        for e in entries:
+            for t in e["local"]:
+                f = files.get(t["id"])
+                t.update(likely_bgm=f["likely_bgm"] if f else None, readable=f["readable"] if f else False,
+                         missing=f is None)
+        return {"entries": entries}
 
     # ---------- 試聴・エクスプローラーで開く ----------
 
