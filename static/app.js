@@ -52,15 +52,15 @@ function badge(likelyBgm) {
   return `<span class="badge unk">?</span>`;
 }
 
-// ▶と📂はタスク5で動くようにする（今は押しても何もしない）
 function tracksHtml(tracks) {
   const rows = tracks.map((t, i) => `
     <li class="track" data-id="${esc(t.id)}">
       <span class="rank num">${i + 1}</span>
-      <button type="button" class="icon-btn" title="試聴">▶</button>
+      <button type="button" class="icon-btn play" title="試聴" ${t.readable ? "" : "disabled"}>▶</button>
       <div class="info">
         <div class="name">${esc(t.filename)}</div>
         <div class="path">${esc(t.root_label)} / ${esc(t.rel_path)}</div>
+        ${t.readable ? "" : `<div class="note">このファイルは再生できません</div>`}
       </div>
       ${badge(t.likely_bgm)}
       <span class="dur num">${fmtDur(t.duration_sec)}</span>
@@ -68,6 +68,72 @@ function tracksHtml(tracks) {
     </li>`).join("");
   return `<div class="win"><div class="win-title">手持ちの素材 <span class="sub">${tracks.length}件</span></div><ul class="tracks">${rows}</ul></div>`;
 }
+
+/* ---------- 試聴・エクスプローラーで開く ---------- */
+
+// 同時に鳴るのは1つだけにするため、音を出すのはこの1つの Audio だけ
+const player = new Audio();
+let playingBtn = null; // 再生中の▶ボタン（■になっている）
+
+function stopPlaying() {
+  player.pause();
+  player.removeAttribute("src");
+  player.load();
+  if (playingBtn) {
+    playingBtn.textContent = "▶";
+    playingBtn.title = "試聴";
+    playingBtn = null;
+  }
+}
+
+player.addEventListener("ended", stopPlaying);
+
+// 1行の下に、失敗したときの赤字を出す（次に押したときに消す）
+function trackNote(row, text) {
+  let note = row.querySelector(".note.play-error");
+  if (!note && text) {
+    note = document.createElement("div");
+    note.className = "note play-error";
+    row.querySelector(".info").append(note);
+  }
+  if (note) text ? (note.textContent = text) : note.remove();
+}
+
+async function togglePlay(btn, row) {
+  const same = playingBtn === btn;
+  stopPlaying();
+  if (same) return; // 再生中の▶をもう一度押したら止めるだけ
+  trackNote(row, "");
+  playingBtn = btn;
+  btn.textContent = "■";
+  btn.title = "停止";
+  player.src = `/api/audio/${encodeURIComponent(row.dataset.id)}`;
+  try {
+    await player.play();
+  } catch (e) {
+    if (e.name === "AbortError") return; // 読み込み中に別の▶が押された
+    if (playingBtn === btn) stopPlaying();
+    trackNote(row, "このファイルは再生できません（ファイルが移動・削除されたか、ブラウザが対応していない形式です）");
+  }
+}
+
+async function reveal(row) {
+  trackNote(row, "");
+  try {
+    await api("POST", `/api/reveal/${encodeURIComponent(row.dataset.id)}`);
+  } catch (e) {
+    trackNote(row, e.message);
+  }
+}
+
+// 結果は書き直されるので、一覧の外側で受ける
+$("#search-body").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button.icon-btn");
+  const row = btn && btn.closest(".track[data-id]");
+  if (!row || btn.disabled) return;
+  if (btn.classList.contains("play")) togglePlay(btn, row);
+  else if (btn.classList.contains("folder")) reveal(row);
+});
 
 let searchTimer = null;
 
@@ -86,6 +152,7 @@ $("#quest").addEventListener("submit", async (ev) => {
   const button = ev.target.querySelector("button");
   const body = $("#search-body");
   button.disabled = true;
+  stopPlaying(); // 結果を書き直すと▶ボタンが消えるので、先に止める
   showSearching();
   try {
     const r = await api("POST", "/api/search", { query: ev.target.elements.query.value });

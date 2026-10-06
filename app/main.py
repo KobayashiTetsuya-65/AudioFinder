@@ -1,13 +1,16 @@
 """FastAPI本体。APIと画面（static/）を配信する。"""
 
 import ntpath
+import re
 import secrets
+import subprocess
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -15,6 +18,8 @@ from app import ai, scanner, storage
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 JST = timezone(timedelta(hours=9))
+FILE_ID = re.compile(r"[0-9a-f]{12}")  # scanner.file_id の形
+AUDIO_TYPES = {"wav": "audio/wav", "mp3": "audio/mpeg", "ogg": "audio/ogg"}
 
 
 class RootIn(BaseModel):
@@ -53,8 +58,16 @@ def _new_root_id(roots: list) -> str:
             return rid
 
 
-def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR, ai_runner=ai.run_claude) -> FastAPI:
-    """ai_runner：`claude -p` を呼ぶ関数。テストでは偽物を渡す。"""
+def reveal_in_explorer(path: Path) -> None:
+    """エクスプローラーで、そのファイルを選択した状態で開く。
+    "/select," とパスを別の引数にすると、空白を含むパスでも正しく渡る。explorer は成功しても 1 を返すので終了コードは見ない。
+    """
+    subprocess.Popen(["explorer", "/select,", str(path)])
+
+
+def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR, ai_runner=ai.run_claude,
+               revealer=reveal_in_explorer) -> FastAPI:
+    """ai_runner：`claude -p` を呼ぶ関数。revealer：エクスプローラーを開く関数。テストではどちらも偽物を渡す。"""
     storage.load_config(data_dir)  # 初回は config.json を作る
     config_path = data_dir / "config.json"
     lock = threading.Lock()  # config.json の読み→書きが同時に走らないように
@@ -203,6 +216,49 @@ def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR, ai_runner=ai.run_claud
                 "readable": f["readable"],
             })
         return {"query": query, "elapsed_sec": elapsed, "conditions": result["conditions"], "local": local}
+
+    # ---------- 試聴・エクスプローラーで開く ----------
+
+    def _file_path(file_id: str):
+        """目録のIDから実際のファイルのパスを返す（SPEC 10章 安全面）。
+
+        パスは受け取らない。目録にないID、登録が外れたフォルダ、登録フォルダの外を指すもの、今は無いファイルは404。
+        """
+        not_found = HTTPException(404, "そのファイルは目録にありません。再スキャンしてください")
+        if not FILE_ID.fullmatch(file_id):
+            raise not_found
+        index = scanner.load_index(data_dir)
+        entry = next((f for f in index["files"] if f["id"] == file_id), None) if index else None
+        if entry is None:
+            raise not_found
+        with lock:
+            config = storage.load_config(data_dir)
+        root = next((r for r in config["roots"] if r["id"] == entry["root_id"]), None)
+        if root is None:
+            raise not_found
+        root_path = Path(root["path"]).resolve()
+        path = root_path.joinpath(*entry["rel_path"].split("/")).resolve()
+        # 目録が書き換えられていても、登録フォルダの外には触らない
+        if not path.is_relative_to(root_path) or not path.is_file():
+            raise not_found
+        return path, entry
+
+    @app.get("/api/audio/{file_id:path}")  # 「/」を含む不正な要求もここで受けて404にする
+    def audio(file_id: str):
+        path, entry = _file_path(file_id)
+        media_type = AUDIO_TYPES.get(entry["ext"])
+        if media_type is None:
+            raise HTTPException(404, "このファイルは再生できません")
+        # FileResponse は Range 要求に対応しているので、途中への頭出しもできる
+        return FileResponse(path, media_type=media_type)
+
+    @app.post("/api/reveal/{file_id:path}", status_code=204)
+    def reveal(file_id: str):
+        path, _ = _file_path(file_id)
+        try:
+            revealer(path)
+        except OSError as e:
+            raise HTTPException(500, f"エクスプローラーを開けませんでした：{e}")
 
     # API より後に登録する（"/" 以下をすべて受けるため）
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
