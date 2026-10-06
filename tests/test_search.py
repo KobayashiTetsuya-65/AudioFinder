@@ -10,9 +10,11 @@ CONDITIONS = {"kind": "bgm", "mood": ["緊迫"], "genre": ["オーケストラ"]
 
 
 def make_index(data_dir, n):
-    """f000000000000〜 のIDを持つ n 件の目録を書く。"""
+    """f000000000000〜 のIDを持つ n 件の目録を書く。登録フォルダは実在する空のフォルダにする。"""
     config = storage.load_config(data_dir)
-    config["roots"] = [{"id": "r_1", "label": "Pack", "path": "D:\\Pack", "enabled": True, "added_at": "2026-10-06T21:00:00+09:00"}]
+    pack = data_dir.parent / "Pack"
+    pack.mkdir(exist_ok=True)
+    config["roots"] = [{"id": "r_1", "label": "Pack", "path": str(pack), "enabled": True, "added_at": "2026-10-06T21:00:00+09:00"}]
     storage.save_json(data_dir / "config.json", config)
     files = [
         {"id": f"f{i:011d}", "root_id": "r_1", "rel_path": f"Battle/Boss_{i}.ogg", "filename": f"Boss_{i}.ogg",
@@ -123,19 +125,144 @@ def test_malformed_answer_is_error(data_dir, answer):
     assert "形が正しくありません" in res.json()["detail"]
 
 
-def test_unreadable_json_is_error(data_dir):
-    make_index(data_dir, 1)
-    res = client_with(data_dir, lambda *a: "これはJSONではない").post("/api/search", json={"query": "ボス"})
-    assert res.status_code == 502
-    assert "JSON" in res.json()["detail"]
-
-
 def test_ai_error_result_is_shown(data_dir):
     make_index(data_dir, 1)
-    runner = fake_claude(outer={"type": "result", "is_error": True, "result": "Failed to authenticate"})
+    runner = fake_claude(outer={"type": "result", "is_error": True, "result": "Overloaded"})
     res = client_with(data_dir, runner).post("/api/search", json={"query": "ボス"})
     assert res.status_code == 502
-    assert "Failed to authenticate" in res.json()["detail"]
+    assert "Overloaded" in res.json()["detail"]
+    assert res.json()["error"]["kind"] == "error"
+
+
+# ---------- エラー時の動き（SPEC 10章） ----------
+
+def error_runner(outer):
+    """`claude -p` がエラーを返したときの出力を真似る偽物。"""
+    return fake_claude(outer={"type": "result", "subtype": "success", "is_error": True, **outer})
+
+
+def search_error(data_dir, runner):
+    make_index(data_dir, 1)
+    res = client_with(data_dir, runner).post("/api/search", json={"query": "ボス"})
+    assert res.status_code == 502
+    return res.json()
+
+
+def test_not_logged_in(data_dir):
+    # 実物の claude -p（2.1.291）で、ログインしていないときに返ってきた文
+    body = search_error(data_dir, error_runner({"result": "Not logged in · Please run /login"}))
+    assert body["detail"] == "Claude Code にログインしてください"
+    assert body["error"]["kind"] == "login"
+    assert "ログイン" in body["error"]["hint"]
+
+
+def test_claude_not_installed(data_dir, monkeypatch):
+    monkeypatch.setattr(ai.shutil, "which", lambda name: None)
+    body = search_error(data_dir, ai.run_claude)  # 本物の run_claude だが、claude が見つからないので起動しない
+    assert body["error"]["kind"] == "login"
+    assert "見つかりません" in body["error"]["hint"]
+
+
+@pytest.mark.parametrize("outer, hint", [
+    # リセット時刻がUNIX時刻で付いてくる形（1760000400 は 2025-10-09 18:00 JST）
+    ({"result": "Claude AI usage limit reached|1760000400"}, "18:00 ごろ回復する見込みです。"),
+    ({"result": "You've hit your limit · resets 11pm (Asia/Tokyo)"}, "リセット：11pm (Asia/Tokyo)"),
+    # リセット時刻が分からないとき
+    ({"result": "API Error: 429", "api_error_status": 429}, "しばらく待ってから、もう一度「探す」を押してください。"),
+])
+def test_usage_limit(data_dir, outer, hint):
+    body = search_error(data_dir, error_runner(outer))
+    assert body["detail"] == "利用上限に達しました"
+    assert body["error"] == {"kind": "limit", "hint": hint}
+
+
+def test_timeout(data_dir):
+    def runner(prompt, cwd, timeout_sec):
+        raise ai.AIError(f"時間切れ（{timeout_sec:g}秒以内に応答がありませんでした）", "timeout")
+
+    body = search_error(data_dir, runner)
+    assert body["error"]["kind"] == "timeout"
+    assert body["detail"] == "時間切れ（60秒以内に応答がありませんでした）"
+
+
+def test_run_claude_timeout(monkeypatch, tmp_path):
+    """本物の run_claude が、子プロセスの時間切れを「時間切れ」のエラーに置き換える（claude は起動しない）。"""
+    def fake_run(cmd, **kw):
+        raise ai.subprocess.TimeoutExpired(cmd, kw["timeout"])
+
+    monkeypatch.setattr(ai.shutil, "which", lambda name: "claude")
+    monkeypatch.setattr(ai.subprocess, "run", fake_run)
+    with pytest.raises(ai.AIError) as e:
+        ai.run_claude("ボス", tmp_path, 1)
+    assert e.value.kind == "timeout"
+    assert str(e.value) == "時間切れ（1秒以内に応答がありませんでした）"
+
+
+def flaky_runner(outputs):
+    """呼ばれるたびに outputs を順に返す偽物。"""
+    calls = []
+
+    def runner(prompt, cwd, timeout_sec):
+        calls.append(prompt)
+        return outputs[len(calls) - 1]
+
+    runner.calls = calls
+    return runner
+
+
+def test_broken_json_once_then_success(data_dir):
+    ids = make_index(data_dir, 1)
+    good = json.dumps({"type": "result", "is_error": False, "result": "",
+                       "structured_output": {"conditions": CONDITIONS, "local": [{"id": ids[0]}]}})
+    runner = flaky_runner(["これはJSONではない", good])
+    res = client_with(data_dir, runner).post("/api/search", json={"query": "ボス"})
+    assert res.status_code == 200
+    assert [t["id"] for t in res.json()["local"]] == ids
+    assert len(runner.calls) == 2  # 1回だけ自動で再試行した
+
+
+def test_broken_json_twice_is_error(data_dir):
+    runner = flaky_runner(["これはJSONではない", '{"type": "result", "is_error": false, "result": "壊れた{json"}', "使われない"])
+    body = search_error(data_dir, runner)
+    assert len(runner.calls) == 2  # 再試行は1回だけ
+    assert body["error"]["kind"] == "invalid_json"
+    assert "JSON" in body["detail"]
+
+
+def test_other_errors_are_not_retried(data_dir):
+    runner = error_runner({"result": "Not logged in · Please run /login"})
+    search_error(data_dir, runner)
+    assert len(runner.calls) == 1
+
+
+def test_missing_root_is_skipped_and_reported(data_dir):
+    ids = make_index(data_dir, 2)
+    # 登録フォルダを2つ足す。「Gone」は目録を作ったあとに消えた（名前変更・外付けを外した）もの、「Off」は無効のもの
+    gone = data_dir.parent / "Gone"
+    config = storage.load_config(data_dir)
+    config["roots"] += [
+        {"id": "r_2", "label": "Gone Pack", "path": str(gone), "enabled": True, "added_at": "2026-10-06T21:00:00+09:00"},
+        {"id": "r_3", "label": "Off", "path": str(data_dir.parent / "Off"), "enabled": False,
+         "added_at": "2026-10-06T21:00:00+09:00"},
+    ]
+    storage.save_json(data_dir / "config.json", config)
+    index = scanner.load_index(data_dir)
+    index["files"].append({**index["files"][0], "id": "a00000000000", "root_id": "r_2"})
+    scanner.save_index(data_dir, index)
+
+    runner = fake_claude({"conditions": CONDITIONS, "local": [{"id": "a00000000000"}, {"id": ids[1]}, {"id": ids[0]}]})
+    res = client_with(data_dir, runner).post("/api/search", json={"query": "ボス"})
+    assert res.status_code == 200
+    body = res.json()
+    assert [t["id"] for t in body["local"]] == [ids[1], ids[0]]  # 見つからないフォルダのファイルは飛ばし、他は出す
+    assert body["missing_roots"] == [{"id": "r_2", "label": "Gone Pack", "path": str(gone)}]  # 無効のフォルダは注意しない
+
+
+def test_no_missing_roots(data_dir):
+    ids = make_index(data_dir, 1)
+    runner = fake_claude({"conditions": CONDITIONS, "local": [{"id": ids[0]}]})
+    res = client_with(data_dir, runner).post("/api/search", json={"query": "ボス"})
+    assert res.json()["missing_roots"] == []
 
 
 # ---------- 入力と目録のチェック ----------

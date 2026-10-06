@@ -11,7 +11,8 @@ document.querySelectorAll("nav button").forEach((button) => {
   });
 });
 
-// API呼び出し。失敗したらサーバーのメッセージ（detail）を持った Error を投げる
+// API呼び出し。失敗したらサーバーのメッセージ（detail）を持った Error を投げる。
+// 検索のエラーは種類と説明（{ kind, hint }）も e.info に持たせる
 async function api(method, url, body) {
   const res = await fetch(url, {
     method,
@@ -20,7 +21,11 @@ async function api(method, url, body) {
   });
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : `エラーが発生しました（${res.status}）`);
+  if (!res.ok) {
+    const err = new Error(typeof data.detail === "string" ? data.detail : `エラーが発生しました（${res.status}）`);
+    err.info = data.error || null;
+    throw err;
+  }
   return data;
 }
 
@@ -141,8 +146,37 @@ async function reveal(row) {
   }
 }
 
+/* ---------- 帯（エラー・注意）と0件（SPEC 8.2・10章） ---------- */
+
+// 検索画面の帯。small は帯の下に小さく出す説明、retry なら「再試行」ボタンをつける
+function bandHtml(type, icon, title, small, retry) {
+  return `<div class="band ${type}">${icon}<div class="msg">${esc(title)}${small ? `<small>${esc(small)}</small>` : ""}</div>` +
+    `${retry ? `<button type="button" class="btn small retry">再試行</button>` : ""}</div>`;
+}
+
+// e.info.kind：login（未インストール・未ログイン）／limit（利用上限）／timeout（時間切れ）／invalid_json／error
+function errorBandHtml(e) {
+  const info = e.info || {};
+  if (info.kind === "timeout") return bandHtml("error", "⌛", e.message, info.hint, true);
+  return bandHtml("error", "✖", e.message, info.hint, false);
+}
+
+function missingRootsHtml(roots) {
+  return roots.map((r) => bandHtml("warn", "⚠", `フォルダ「${r.label}」が見つかりません`,
+    `${r.path} を飛ばして検索しました。外付けドライブが外れていないか確認してください。`, false)).join("");
+}
+
+const EMPTY_HTML = `<div class="win empty"><div class="big">該当なし</div><p>こんな言い方で試してみてください：</p><ul>
+  <li>ジャンルを外す（例：「ボス戦、緊迫感」だけにする）</li>
+  <li>英語で書く（例：「boss battle, epic」）</li>
+  <li>近い場面に言い換える（例：「強敵との戦闘」）</li></ul></div>`;
+
 // 結果は書き直されるので、一覧の外側で受ける
 $("#search-body").addEventListener("click", (ev) => {
+  if (ev.target.closest("button.retry")) {
+    if (lastQuery !== null) runSearch(lastQuery);
+    return;
+  }
   const btn = ev.target.closest("button.icon-btn");
   const row = btn && btn.closest(".track[data-id]");
   if (!row || btn.disabled) return;
@@ -162,22 +196,32 @@ function showSearching() {
   }, 1000);
 }
 
-$("#quest").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const button = ev.target.querySelector("button");
+let lastQuery = null; // 再試行ボタンで、同じ場面説明をもう一度探すため
+
+async function runSearch(query) {
+  const button = $("#quest button");
   const body = $("#search-body");
+  if (button.disabled) return; // 検索中の二重送信を防ぐ
+  lastQuery = query;
   button.disabled = true;
   stopPlaying(); // 結果を書き直すと▶ボタンが消えるので、先に止める
   showSearching();
   try {
-    const r = await api("POST", "/api/search", { query: ev.target.elements.query.value });
-    body.innerHTML = conditionsHtml(r.conditions) + tracksHtml(r.local) + sitesHtml(r.sites);
+    const r = await api("POST", "/api/search", { query });
+    // 0件のときは「読み取った条件」の下に「該当なし」と言い換えの例。サイトの案内はあれば続けて出す
+    const local = r.local.length ? tracksHtml(r.local) : EMPTY_HTML;
+    body.innerHTML = missingRootsHtml(r.missing_roots) + conditionsHtml(r.conditions) + local + sitesHtml(r.sites);
   } catch (e) {
-    showMsg(body, "error", e.message);
+    body.innerHTML = errorBandHtml(e);
   } finally {
     clearInterval(searchTimer);
     button.disabled = false;
   }
+}
+
+$("#quest").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  runSearch(ev.target.elements.query.value);
 });
 
 /* ---------- 設定：検索対象フォルダ ---------- */

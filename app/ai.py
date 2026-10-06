@@ -5,8 +5,10 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
@@ -55,7 +57,58 @@ RESPONSE_SCHEMA = {
 
 
 class AIError(Exception):
-    """AIを呼べなかった、または応答が使えなかった。メッセージはそのまま画面に出す。"""
+    """AIを呼べなかった、または応答が使えなかった。メッセージはそのまま画面に出す（SPEC 10章）。
+
+    kind：画面の帯の出し分けに使う。"login"（未インストール・未ログイン）／"limit"（利用上限）／
+    "timeout"（時間切れ。再試行ボタンを出す）／"invalid_json"（JSONとして読めない）／"error"（その他）
+    hint：帯の下に小さく出す説明（手順など）。
+    """
+
+    def __init__(self, message: str, kind: str = "error", hint: str | None = None):
+        super().__init__(message)
+        self.kind = kind
+        self.hint = hint
+
+
+class InvalidJSON(AIError):
+    """応答がJSONとして読めない。設定の回数（既定1回）だけ自動で再試行する（SPEC 10章）。"""
+
+    def __init__(self):
+        super().__init__("AIの応答をJSONとして読み取れませんでした", "invalid_json",
+                         "自動で再試行しましたが読み取れませんでした。もう一度「探す」を押してください。")
+
+
+LOGIN_MESSAGE = "Claude Code にログインしてください"
+LOGIN_HINT = "ターミナルで「claude」を起動してログインしてから、もう一度「探す」を押してください。"
+JST = timezone(timedelta(hours=9))
+
+# claude -p のエラー文の見分け方。未ログインは実物で確認した（"Not logged in · Please run /login"）。
+# 利用上限は手元で起こせないので、知られている言い方（"Claude AI usage limit reached|<リセットのUNIX時刻>"、
+# "You've hit your limit · resets 11pm (Asia/Tokyo)" など）と HTTP 429 で見分ける
+_LIMIT = re.compile(r"limit reached|hit your limit|usage limit|rate limit|rate_limit", re.I)
+_LOGIN = re.compile(r"not logged in|/login|invalid api key|authenticat|oauth|credential", re.I)
+
+
+def _limit_reset(text: str) -> str | None:
+    """エラー文からリセット時刻を取り出し、帯に出す一文にする。分からなければ None。"""
+    m = re.search(r"\|\s*(\d{10})\b", text)
+    if m:
+        return datetime.fromtimestamp(int(m.group(1)), JST).strftime("%H:%M ごろ回復する見込みです。")
+    m = re.search(r"resets?\s+(?:at\s+)?([^·∙|\n]+)", text, re.I)
+    if m:
+        return f"リセット：{m.group(1).strip()}"
+    return None
+
+
+def error_from_claude(text: str, api_status=None) -> AIError:
+    """claude -p が返したエラー文を、画面に出すエラーに置き換える。"""
+    text = text.strip()
+    if api_status == 429 or _LIMIT.search(text):
+        return AIError("利用上限に達しました", "limit",
+                       _limit_reset(text) or "しばらく待ってから、もう一度「探す」を押してください。")
+    if api_status in (401, 403) or _LOGIN.search(text):
+        return AIError(LOGIN_MESSAGE, "login", LOGIN_HINT)
+    return AIError(f"AIがエラーを返しました：{text or '不明なエラー'}")
 
 
 def build_command(claude_path: str) -> list:
@@ -82,7 +135,8 @@ def run_claude(prompt: str, cwd: Path, timeout_sec: float) -> str:
     """`claude -p` を子プロセスで1回呼び、標準出力（JSON）を返す。"""
     claude_path = shutil.which("claude")
     if claude_path is None:
-        raise AIError("Claude Code が見つかりません。インストールしてログインしてから、もう一度探してください")
+        raise AIError(LOGIN_MESSAGE, "login",
+                      "Claude Code が見つかりません。インストールしてから、" + LOGIN_HINT)
     try:
         proc = subprocess.run(
             build_command(claude_path),
@@ -96,9 +150,12 @@ def run_claude(prompt: str, cwd: Path, timeout_sec: float) -> str:
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,  # 黒い窓を出さない
         )
     except subprocess.TimeoutExpired:
-        raise AIError(f"時間切れです（{timeout_sec:g}秒以内に応答がありませんでした）")
+        raise AIError(f"時間切れ（{timeout_sec:g}秒以内に応答がありませんでした）", "timeout")
     if not proc.stdout.strip():
-        raise AIError(f"AIの呼び出しに失敗しました：{proc.stderr.strip() or f'終了コード {proc.returncode}'}")
+        err = error_from_claude(proc.stderr)
+        if err.kind == "error":
+            err = AIError(f"AIの呼び出しに失敗しました：{proc.stderr.strip() or f'終了コード {proc.returncode}'}")
+        raise err
     return proc.stdout
 
 
@@ -107,11 +164,11 @@ def _parse_answer(stdout: str) -> dict:
     try:
         outer = json.loads(stdout)
     except json.JSONDecodeError:
-        raise AIError("AIの応答をJSONとして読み取れませんでした")
+        raise InvalidJSON()
     if not isinstance(outer, dict):
-        raise AIError("AIの応答をJSONとして読み取れませんでした")
+        raise InvalidJSON()
     if outer.get("is_error"):
-        raise AIError(f"AIがエラーを返しました：{outer.get('result') or outer.get('subtype') or '不明なエラー'}")
+        raise error_from_claude(str(outer.get("result") or outer.get("subtype") or ""), outer.get("api_error_status"))
 
     answer = outer.get("structured_output")
     if answer is None:  # 念のため、本文にJSONが書かれている場合も読む
@@ -121,7 +178,7 @@ def _parse_answer(stdout: str) -> dict:
         try:
             answer = json.loads(text)
         except json.JSONDecodeError:
-            raise AIError("AIの応答をJSONとして読み取れませんでした")
+            raise InvalidJSON()
     if not isinstance(answer, dict):
         raise AIError("AIの応答の形が正しくありません")
     return answer
@@ -213,8 +270,18 @@ def validate(answer: dict, known_ids, sites: list = ()) -> dict:
     }
 
 
-def search(query: str, data_dir: Path, known_ids, timeout_sec: float, runner=run_claude, sites: list = ()) -> dict:
-    """場面の説明から、条件・ローカル候補・サイトへの案内を返す。作業フォルダは data/（AIはそこの index.json を検索する）。"""
+def search(query: str, data_dir: Path, known_ids, timeout_sec: float, runner=run_claude, sites: list = (),
+           retries: int = 1) -> dict:
+    """場面の説明から、条件・ローカル候補・サイトへの案内を返す。作業フォルダは data/（AIはそこの index.json を検索する）。
+
+    retries：応答がJSONとして読めなかったときに自動で呼び直す回数（config の ai.retry_on_invalid_json）。
+    """
     prompt = f"場面の説明：\n{query}\n\n誘導先サイトの一覧：\n{sites_for_prompt(list(sites))}"
-    stdout = runner(prompt, data_dir, timeout_sec)
-    return validate(_parse_answer(stdout), known_ids, sites)
+    for attempt in range(retries + 1):
+        try:
+            answer = _parse_answer(runner(prompt, data_dir, timeout_sec))
+            break
+        except InvalidJSON:
+            if attempt >= retries:
+                raise
+    return validate(answer, known_ids, sites)
