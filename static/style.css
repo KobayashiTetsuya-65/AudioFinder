@@ -84,6 +84,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px 16px; }
 .btn.primary { background: linear-gradient(#f3d27e, #c99a35); color: #2a1d00; border-color: #fff3c4; }
 .btn.small { padding: 3px 10px; font-size: 13px; }
 .btn.danger { border-color: var(--red); color: var(--red); background: transparent; }
+.btn:disabled { filter: grayscale(1) brightness(0.7); cursor: not-allowed; transform: none; box-shadow: 0 3px 0 #000a; }
 .icon-btn {
   width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--cyan);
   background: #0f2a3a; color: var(--cyan); cursor: pointer; font-size: 14px; flex: none;
