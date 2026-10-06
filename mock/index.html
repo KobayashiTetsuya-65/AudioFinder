@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio Finder（UIモック）</title>
+<style>
+  :root {
+    --bg: #0b0f1e;
+    --bg2: #141a33;
+    --panel: #161d3a;
+    --panel-hi: #1e2750;
+    --line: #c9a54a;
+    --line-dim: #6b5a2e;
+    --text: #ece6d2;
+    --muted: #9a97a8;
+    --gold: #f0c96a;
+    --cyan: #6fd8f0;
+    --green: #7be08a;
+    --red: #ff6b6b;
+    --yellow: #ffd36b;
+    --violet: #b48cff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, #2a2f6b55, transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, #4a1f5a44, transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    min-height: 100vh;
+    padding-bottom: 72px;
+  }
+  .num { font-family: Consolas, "Courier New", monospace; }
+
+  /* ---------- ヘッダー ---------- */
+  header {
+    display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+    padding: 14px 24px;
+    border-bottom: 2px solid var(--line-dim);
+    background: linear-gradient(#10152b, #0b0f1e);
+  }
+  .logo { font-size: 22px; font-weight: 700; letter-spacing: .12em; color: var(--gold);
+          text-shadow: 0 0 12px #f0c96a66; }
+  .logo small { display: block; font-size: 11px; letter-spacing: .3em; color: var(--muted); font-weight: 400; }
+  nav { display: flex; gap: 6px; }
+  nav button {
+    background: transparent; color: var(--muted); border: 2px solid transparent;
+    padding: 6px 16px 6px 22px; font: inherit; font-weight: 700; cursor: pointer; position: relative;
+  }
+  nav button::before { content: "▶"; position: absolute; left: 6px; font-size: 10px; top: 50%;
+                       transform: translateY(-50%); opacity: 0; color: var(--gold); }
+  nav button:hover { color: var(--text); }
+  nav button.active { color: var(--gold); border-color: var(--line); background: var(--panel); }
+  nav button.active::before, nav button:hover::before { opacity: 1; }
+
+  main { max-width: 1080px; margin: 0 auto; padding: 24px 16px; }
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  /* ---------- RPGウィンドウ風パネル ---------- */
+  .win {
+    background: linear-gradient(180deg, var(--panel-hi), var(--panel));
+    border: 2px solid var(--line);
+    border-radius: 6px;
+    box-shadow: inset 0 0 0 3px var(--bg), inset 0 0 0 4px var(--line-dim), 0 8px 24px #0008;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+  }
+  .win-title {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 700; color: var(--gold); letter-spacing: .08em; margin: 0 0 12px;
+    font-size: 16px;
+  }
+  .win-title .sub { color: var(--muted); font-weight: 400; font-size: 13px; letter-spacing: 0; }
+  .win-title::before { content: "◆"; font-size: 12px; }
+
+  /* ---------- ボタン ---------- */
+  .btn {
+    font: inherit; font-weight: 700; cursor: pointer;
+    background: linear-gradient(#3a3070, #241d4d); color: var(--text);
+    border: 2px solid var(--line); border-radius: 4px; padding: 8px 18px;
+    box-shadow: 0 3px 0 #000a; transition: transform .05s, filter .1s;
+  }
+  .btn:hover { filter: brightness(1.2); }
+  .btn:active { transform: translateY(2px); box-shadow: 0 1px 0 #000a; }
+  .btn.primary { background: linear-gradient(#f3d27e, #c99a35); color: #2a1d00; border-color: #fff3c4; }
+  .btn.small { padding: 3px 10px; font-size: 13px; }
+  .btn.danger { border-color: var(--red); color: var(--red); background: transparent; }
+  .icon-btn {
+    width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--cyan);
+    background: #0f2a3a; color: var(--cyan); cursor: pointer; font-size: 14px; flex: none;
+  }
+  .icon-btn:hover { background: #164058; }
+  .icon-btn:disabled { border-color: #444; color: #555; background: #1a1a22; cursor: not-allowed; }
+  .icon-btn.folder { border-color: var(--line-dim); color: var(--gold); background: transparent; border-radius: 6px; }
+
+  /* ---------- 検索 ---------- */
+  .quest { display: flex; gap: 12px; align-items: stretch; }
+  .quest textarea {
+    flex: 1; min-height: 64px; resize: vertical;
+    background: #0a0e1c; color: var(--text); border: 2px solid var(--line-dim); border-radius: 4px;
+    padding: 10px 12px; font: inherit;
+  }
+  .quest textarea:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px #f0c96a33; }
+  .quest .btn { min-width: 120px; font-size: 17px; }
+
+  /* 帯（エラー・注意） */
+  .band { display: flex; gap: 12px; align-items: center; padding: 10px 16px; border-radius: 4px;
+          margin-bottom: 16px; font-weight: 700; border: 2px solid; }
+  .band .msg { flex: 1; }
+  .band .msg small { display: block; font-weight: 400; color: var(--text); opacity: .85; }
+  .band.error { background: #3a0f16; border-color: var(--red); color: var(--red); }
+  .band.warn  { background: #3a2e0f; border-color: var(--yellow); color: var(--yellow); }
+
+  /* 検索中 */
+  .loading { text-align: center; padding: 40px 0; }
+  .loading .spell { font-size: 20px; color: var(--violet); letter-spacing: .2em; }
+  .loading .dots span { display: inline-block; animation: blink 1.2s infinite; }
+  .loading .dots span:nth-child(2) { animation-delay: .2s; }
+  .loading .dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
+  .loading .elapsed { color: var(--muted); margin-top: 8px; }
+  .bar { height: 10px; background: #0a0e1c; border: 1px solid var(--line-dim); border-radius: 5px; overflow: hidden; }
+  .bar > div { height: 100%; background: linear-gradient(90deg, var(--violet), var(--cyan)); }
+
+  /* 条件チップ */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { padding: 2px 12px; border-radius: 999px; border: 1px solid; font-size: 13px; font-weight: 700; }
+  .chip.kind  { color: var(--gold);   border-color: var(--gold);   background: #f0c96a1a; }
+  .chip.mood  { color: var(--red);    border-color: var(--red);    background: #ff6b6b14; }
+  .chip.genre { color: var(--violet); border-color: var(--violet); background: #b48cff14; }
+  .chip.tempo { color: var(--cyan);   border-color: var(--cyan);   background: #6fd8f014; }
+  .chip.loop  { color: var(--green);  border-color: var(--green);  background: #7be08a14; }
+  .chip .k { opacity: .7; font-weight: 400; margin-right: 4px; }
+
+  /* ローカル候補 */
+  .tracks { list-style: none; margin: 0; padding: 0; }
+  .track {
+    display: flex; align-items: center; gap: 14px; padding: 10px 8px;
+    border-bottom: 1px dashed #ffffff1a;
+  }
+  .track:last-child { border-bottom: none; }
+  .track:hover { background: #ffffff08; }
+  .track .rank { width: 26px; color: var(--gold); font-weight: 700; text-align: right; }
+  .track .info { flex: 1; min-width: 0; }
+  .track .name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .track .path { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .track .dur { width: 56px; text-align: right; color: var(--cyan); }
+  .badge { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 3px; width: 44px; text-align: center; }
+  .badge.bgm { background: #f0c96a26; color: var(--gold); }
+  .badge.se  { background: #6fd8f026; color: var(--cyan); }
+  .badge.unk { background: #ffffff14; color: var(--muted); }
+  .track.missing .name { color: var(--muted); text-decoration: line-through; }
+  .track .note { font-size: 12px; color: var(--red); font-weight: 700; }
+
+  /* サイト誘導 */
+  .sites { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .site { border: 1px solid var(--line-dim); border-radius: 4px; padding: 12px 14px; background: #0a0e1c88; }
+  .site h4 { margin: 0 0 8px; color: var(--gold); font-size: 15px; }
+  .site a {
+    display: flex; justify-content: space-between; gap: 8px; text-decoration: none; color: var(--text);
+    padding: 6px 10px; border-radius: 3px; margin-bottom: 6px; border: 1px solid #ffffff1a; background: #ffffff08;
+  }
+  .site a:hover { border-color: var(--cyan); color: var(--cyan); }
+  .site a .ext { color: var(--muted); font-size: 12px; }
+
+  .empty { text-align: center; padding: 28px 0; }
+  .empty .big { font-size: 20px; color: var(--muted); font-weight: 700; letter-spacing: .1em; }
+  .empty ul { display: inline-block; text-align: left; color: var(--text); }
+
+  /* ---------- 設定 ---------- */
+  .roots { width: 100%; border-collapse: collapse; }
+  .roots th, .roots td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #ffffff14; }
+  .roots th { color: var(--muted); font-size: 12px; font-weight: 400; }
+  .roots .path { font-size: 12px; color: var(--muted); word-break: break-all; }
+  .status-ok { color: var(--green); font-weight: 700; }
+  .status-missing { color: var(--red); font-weight: 700; }
+  .toggle { width: 40px; height: 22px; border-radius: 11px; background: #333; border: 1px solid #555;
+            position: relative; display: inline-block; cursor: pointer; vertical-align: middle; }
+  .toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+                   border-radius: 50%; background: #888; }
+  .toggle.on { background: #1f5130; border-color: var(--green); }
+  .toggle.on::after { left: 20px; background: var(--green); }
+  .form-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .form-row input {
+    background: #0a0e1c; color: var(--text); border: 2px solid var(--line-dim); border-radius: 4px;
+    padding: 8px 10px; font: inherit;
+  }
+  .form-row input.path-in { flex: 2; min-width: 260px; }
+  .form-row input.label-in { flex: 1; min-width: 160px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .stat { background: #0a0e1c88; border: 1px solid var(--line-dim); border-radius: 4px; padding: 10px 14px; }
+  .stat .k { font-size: 12px; color: var(--muted); }
+  .stat .v { font-size: 20px; font-weight: 700; color: var(--gold); }
+
+  /* ---------- 履歴 ---------- */
+  .history { display: grid; grid-template-columns: 320px 1fr; gap: 20px; align-items: start; }
+  .hist-list { list-style: none; margin: 0; padding: 0; max-height: 640px; overflow: auto; }
+  .hist-list li { padding: 10px 12px; border: 1px solid transparent; border-radius: 4px; cursor: pointer; margin-bottom: 4px; }
+  .hist-list li:hover { background: #ffffff0a; }
+  .hist-list li.active { border-color: var(--line); background: #f0c96a12; }
+  .hist-list .q { font-weight: 700; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .hist-list .meta { font-size: 12px; color: var(--muted); }
+  .hist-head { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+  .hist-head .q { font-size: 17px; color: var(--text); font-weight: 700; display: block; }
+
+  /* ---------- モック用の切替バー ---------- */
+  .mockbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    padding: 10px 16px; background: #000c; border-top: 1px dashed var(--violet); font-size: 13px;
+  }
+  .mockbar .label { color: var(--violet); font-weight: 700; margin-right: 4px; }
+  .mockbar button { font: inherit; font-size: 12px; background: #222; color: var(--text);
+                    border: 1px solid #555; border-radius: 3px; padding: 3px 10px; cursor: pointer; }
+  .mockbar button.active { border-color: var(--violet); color: var(--violet); }
+
+  @media (max-width: 760px) {
+    .quest { flex-direction: column; }
+    .history { grid-template-columns: 1fr; }
+    .track .path { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">♪ AUDIO FINDER<small>SOUND QUEST FOR GAME DEV</small></div>
+  <nav>
+    <button data-screen="search" class="active">探索</button>
+    <button data-screen="history">履歴</button>
+    <button data-screen="settings">設定</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ============ 8.1 検索画面 ============ -->
+  <section id="screen-search" class="screen active">
+    <div class="win">
+      <div class="win-title">どんな場面の音を探す？</div>
+      <div class="quest">
+        <textarea id="query">ボス戦、緊迫感あり、オーケストラ系、ループ前提</textarea>
+        <button class="btn primary">探す</button>
+      </div>
+    </div>
+    <div id="search-body"></div>
+  </section>
+
+  <!-- ============ 8.3 履歴 ============ -->
+  <section id="screen-history" class="screen">
+    <div class="history">
+      <div class="win">
+        <div class="win-title">冒険の記録 <span class="sub">直近50件</span></div>
+        <ul class="hist-list" id="hist-list"></ul>
+      </div>
+      <div id="hist-detail"></div>
+    </div>
+  </section>
+
+  <!-- ============ 8.2 設定画面 ============ -->
+  <section id="screen-settings" class="screen">
+    <div class="win">
+      <div class="win-title">目録 <span class="sub">ローカル素材のスキャン</span></div>
+      <div class="stats" id="stats"></div>
+      <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+        <button class="btn primary">再スキャン</button>
+        <div style="flex:1; min-width:220px;">
+          <div class="bar"><div style="width:62%"></div></div>
+          <div class="hint">スキャン中… <span class="num">1,284 / 2,071</span> ファイル（モック表示）</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="win">
+      <div class="win-title">検索対象フォルダ</div>
+      <table class="roots">
+        <thead><tr><th>有効</th><th>名前 / パス</th><th>状態</th><th>ファイル数</th><th></th></tr></thead>
+        <tbody id="roots"></tbody>
+      </table>
+    </div>
+
+    <div class="win">
+      <div class="win-title">フォルダを追加</div>
+      <div class="form-row">
+        <input class="path-in" placeholder="フォルダの絶対パス（例：D:\GameAssets\Audio\SciFiPack）">
+        <input class="label-in" placeholder="表示名（例：SciFi Pack）">
+        <button class="btn">追加</button>
+      </div>
+      <div class="hint">※ ブラウザのフォルダ選択では絶対パスが取れないため、パスは文字で入力します。追加後は「再スキャン」で目録に反映されます。</div>
+    </div>
+  </section>
+</main>
+
+<div class="mockbar" id="mockbar">
+  <span class="label">MOCK 探索画面の状態：</span>
+  <button data-state="result" class="active">結果あり</button>
+  <button data-state="result-warn">結果＋フォルダ注意</button>
+  <button data-state="loading">検索中</button>
+  <button data-state="empty">0件</button>
+  <button data-state="err-login">未ログイン</button>
+  <button data-state="err-limit">利用上限</button>
+  <button data-state="err-timeout">時間切れ</button>
+</div>
+
+<script>
+/* =====================================================================
+   ダミーデータ（SPEC.md 9章のデータ構造どおり）
+   ===================================================================== */
+
+// 9.2 config.json
+const config = {
+  version: 1,
+  server: { host: "127.0.0.1", port: 8765 },
+  ai: { timeout_sec: 60, retry_on_invalid_json: 1 },
+  scan: { extensions: [".wav", ".mp3", ".ogg"], bgm_threshold_sec: 30 },
+  history: { max_entries: 50 },
+  roots: [
+    { id: "r_7f3a", label: "Fantasy RPG Music Pack", path: "D:\\GameAssets\\Audio\\FantasyRPG", enabled: true,  added_at: "2026-10-06T21:00:00+09:00" },
+    { id: "r_2c91", label: "UI Sound Collection",    path: "D:\\GameAssets\\Audio\\UISounds",   enabled: true,  added_at: "2026-10-06T21:02:00+09:00" },
+    { id: "r_e044", label: "Ambient Nature Pack",    path: "E:\\Sounds\\AmbientNature",         enabled: true,  added_at: "2026-10-06T21:05:00+09:00" },
+    { id: "r_91bd", label: "Old SE Archive",         path: "D:\\Archive\\OldSE",                enabled: false, added_at: "2026-10-06T21:06:00+09:00" }
+  ]
+};
+
+// 9.3 index.json（files は抜粋）
+const index = {
+  version: 1,
+  scanned_at: "2026-10-06T21:30:00+09:00",
+  roots: [
+    { id: "r_7f3a", status: "ok",      file_count: 412 },
+    { id: "r_2c91", status: "ok",      file_count: 1388 },
+    { id: "r_e044", status: "missing", file_count: 0 },
+    { id: "r_91bd", status: "ok",      file_count: 271 }
+  ],
+  files: [
+    {id:"3f9a1c2e7b04",root_id:"r_7f3a",rel_path:"Battle/Boss_Theme_Loop.ogg",filename:"Boss_Theme_Loop.ogg",folder:"Battle",ext:"ogg",duration_sec:95.4,likely_bgm:true,size_bytes:1843200,mtime:"2025-03-02T10:15:00+09:00",readable:true,words:"fantasy rpg music pack battle boss theme loop"},
+    {id:"a7c2e9014b3d",root_id:"r_7f3a",rel_path:"Battle/Final_Battle_Orchestral.ogg",filename:"Final_Battle_Orchestral.ogg",folder:"Battle",ext:"ogg",duration_sec:142.0,likely_bgm:true,size_bytes:2730000,mtime:"2025-03-02T10:15:00+09:00",readable:true,words:"fantasy rpg music pack battle final battle orchestral"},
+    {id:"5e11b0c84f27",root_id:"r_7f3a",rel_path:"Battle/DarkLord_Approaches.mp3",filename:"DarkLord_Approaches.mp3",folder:"Battle",ext:"mp3",duration_sec:121.8,likely_bgm:true,size_bytes:4870000,mtime:"2025-03-02T10:15:00+09:00",readable:true,words:"fantasy rpg music pack battle dark lord approaches"},
+    {id:"c0d93a7e6612",root_id:"r_7f3a",rel_path:"Battle/Tension_Strings_Loop.wav",filename:"Tension_Strings_Loop.wav",folder:"Battle",ext:"wav",duration_sec:64.0,likely_bgm:true,size_bytes:11289600,mtime:"2025-03-02T10:15:00+09:00",readable:true,words:"fantasy rpg music pack battle tension strings loop"},
+    {id:"9b4f20e1aa58",root_id:"r_7f3a",rel_path:"Dungeon/Deep_Abyss_Loop.ogg",filename:"Deep_Abyss_Loop.ogg",folder:"Dungeon",ext:"ogg",duration_sec:88.2,likely_bgm:true,size_bytes:1690000,mtime:"2025-03-02T10:15:00+09:00",readable:true,words:"fantasy rpg music pack dungeon deep abyss loop"},
+    {id:"e3a8d1f7c045",root_id:"r_91bd",rel_path:"boss/boss_bgm_old_v2.wav",filename:"boss_bgm_old_v2.wav",folder:"boss",ext:"wav",duration_sec:null,likely_bgm:null,size_bytes:0,mtime:"2019-08-11T09:00:00+09:00",readable:false,words:"old se archive boss boss bgm old v 2"},
+    {id:"b81d04f9c2aa",root_id:"r_2c91",rel_path:"SE/UI/CardDraw01.wav",filename:"CardDraw01.wav",folder:"SE/UI",ext:"wav",duration_sec:0.6,likely_bgm:false,size_bytes:52920,mtime:"2025-03-02T10:15:00+09:00",readable:true,words:"ui sound collection se ui card draw 01"},
+    {id:"f12c7ab90d33",root_id:"r_2c91",rel_path:"SE/UI/Card_Shuffle_Soft.wav",filename:"Card_Shuffle_Soft.wav",folder:"SE/UI",ext:"wav",duration_sec:1.4,likely_bgm:false,size_bytes:123480,mtime:"2025-03-02T10:15:00+09:00",readable:true,words:"ui sound collection se ui card shuffle soft"},
+    {id:"0a6e5c3b9f81",root_id:"r_2c91",rel_path:"SE/UI/Paper_Flip_02.ogg",filename:"Paper_Flip_02.ogg",folder:"SE/UI",ext:"ogg",duration_sec:0.4,likely_bgm:false,size_bytes:9800,mtime:"2025-03-02T10:15:00+09:00",readable:true,words:"ui sound collection se ui paper flip 02"},
+    {id:"7d2b8e4c1a90",root_id:"r_7f3a",rel_path:"Town/Shop_Woodwind_Calm.ogg",filename:"Shop_Woodwind_Calm.ogg",folder:"Town",ext:"ogg",duration_sec:73.5,likely_bgm:true,size_bytes:1410000,mtime:"2025-03-02T10:15:00+09:00",readable:true,words:"fantasy rpg music pack town shop woodwind calm"}
+  ]
+};
+
+// 9.6 sites.json（URLはサンプル。実際のURLは実装時に確認して記入）
+const sites = {
+  version: 1,
+  sites: [
+    { id: "maou", name: "魔王魂", top_url: "https://maou.audio/", search_url: "https://maou.audio/?s={q}",
+      kinds: ["bgm", "se"],
+      categories: [
+        { id: "bgm_battle", name: "BGM > 戦闘", kind: "bgm", url: "https://maou.audio/" },
+        { id: "bgm_fantasy", name: "BGM > ファンタジー", kind: "bgm", url: "https://maou.audio/" }
+      ], note: "" },
+    { id: "soundeffect_lab", name: "効果音ラボ", top_url: "https://soundeffect-lab.info/", search_url: null,
+      kinds: ["se", "ambient"],
+      categories: [
+        { id: "se_battle", name: "戦闘", kind: "se", url: "https://soundeffect-lab.info/" },
+        { id: "se_system", name: "システム音", kind: "se", url: "https://soundeffect-lab.info/" }
+      ], note: "BGMは扱わない" },
+    { id: "opentracks", name: "OpenTracks（旧DOVA）", top_url: "https://opentracks.com/", search_url: "https://opentracks.com/search?keywords={q}",
+      kinds: ["bgm", "se"],
+      categories: [
+        { id: "bgm_battle", name: "BGM > バトル", kind: "bgm", url: "https://opentracks.com/" }
+      ], note: "" }
+  ]
+};
+
+// 9.4 AIの応答（claude -p が返すJSON）
+const aiResponse = {
+  conditions: { kind: "bgm", mood: ["緊迫", "壮大"], genre: ["オーケストラ"], tempo: "fast", loop: true },
+  local: [
+    { id: "3f9a1c2e7b04" }, { id: "a7c2e9014b3d" }, { id: "5e11b0c84f27" },
+    { id: "c0d93a7e6612" }, { id: "9b4f20e1aa58" }, { id: "e3a8d1f7c045" }
+  ],
+  sites: [
+    { site_id: "maou", type: "category", category_id: "bgm_battle" },
+    { site_id: "maou", type: "search", q: "ボス" },
+    { site_id: "opentracks", type: "category", category_id: "bgm_battle" },
+    { site_id: "opentracks", type: "search", q: "ボス 戦闘 オーケストラ" }
+  ]
+};
+
+// 9.5 history.json
+const history = {
+  version: 1,
+  entries: [
+    { id: "h_20261006213012", created_at: "2026-10-06T21:30:12+09:00",
+      query: "ボス戦、緊迫感あり、オーケストラ系、ループ前提", elapsed_sec: 12.3,
+      conditions: { kind: "bgm", mood: ["緊迫", "壮大"], genre: ["オーケストラ"], tempo: "fast", loop: true },
+      local: [
+        { id: "3f9a1c2e7b04", filename: "Boss_Theme_Loop.ogg", rel_path: "Battle/Boss_Theme_Loop.ogg", root_label: "Fantasy RPG Music Pack", duration_sec: 95.4 },
+        { id: "a7c2e9014b3d", filename: "Final_Battle_Orchestral.ogg", rel_path: "Battle/Final_Battle_Orchestral.ogg", root_label: "Fantasy RPG Music Pack", duration_sec: 142.0 }
+      ],
+      sites: [
+        { site_id: "maou", site_name: "魔王魂", label: "BGM > 戦闘", url: "https://maou.audio/" },
+        { site_id: "opentracks", site_name: "OpenTracks（旧DOVA）", label: "検索：ボス 戦闘", url: "https://opentracks.com/search?keywords=%E3%83%9C%E3%82%B9%20%E6%88%A6%E9%97%98" }
+      ] },
+    { id: "h_20261006204540", created_at: "2026-10-06T20:45:40+09:00",
+      query: "カードを引くときの軽い音", elapsed_sec: 8.1,
+      conditions: { kind: "se", mood: ["軽快"], genre: ["UI"], tempo: null, loop: false },
+      local: [
+        { id: "b81d04f9c2aa", filename: "CardDraw01.wav", rel_path: "SE/UI/CardDraw01.wav", root_label: "UI Sound Collection", duration_sec: 0.6 },
+        { id: "0a6e5c3b9f81", filename: "Paper_Flip_02.ogg", rel_path: "SE/UI/Paper_Flip_02.ogg", root_label: "UI Sound Collection", duration_sec: 0.4 },
+        { id: "deadbeef0001", filename: "card_slide_short.wav", rel_path: "SE/Card/card_slide_short.wav", root_label: "UI Sound Collection", duration_sec: 0.5 }
+      ],
+      sites: [
+        { site_id: "soundeffect_lab", site_name: "効果音ラボ", label: "システム音", url: "https://soundeffect-lab.info/" },
+        { site_id: "maou", site_name: "魔王魂", label: "検索：カード", url: "https://maou.audio/?s=%E3%82%AB%E3%83%BC%E3%83%89" }
+      ] },
+    { id: "h_20261005223301", created_at: "2026-10-05T22:33:01+09:00",
+      query: "ショップ画面、落ち着いた木管", elapsed_sec: 10.6,
+      conditions: { kind: "bgm", mood: ["穏やか"], genre: ["木管", "アコースティック"], tempo: "slow", loop: true },
+      local: [
+        { id: "7d2b8e4c1a90", filename: "Shop_Woodwind_Calm.ogg", rel_path: "Town/Shop_Woodwind_Calm.ogg", root_label: "Fantasy RPG Music Pack", duration_sec: 73.5 }
+      ],
+      sites: [
+        { site_id: "maou", site_name: "魔王魂", label: "BGM > ファンタジー", url: "https://maou.audio/" }
+      ] }
+  ]
+};
+
+/* =====================================================================
+   表示用の小道具
+   ===================================================================== */
+const KIND  = { bgm: "BGM", se: "SE", ambient: "環境音" };
+const TEMPO = { slow: "ゆっくり", medium: "ふつう", fast: "速め" };
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmtDur = (sec) => sec == null ? "--:--" : `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
+const fmtDate = (iso) => iso.slice(0, 16).replace("T", " ");
+const rootOf = (id) => config.roots.find((r) => r.id === id);
+const fileOf = (id) => index.files.find((f) => f.id === id);
+
+function conditionsHtml(c) {
+  const chips = [`<span class="chip kind">${KIND[c.kind]}</span>`];
+  c.mood.forEach((m) => chips.push(`<span class="chip mood"><span class="k">雰囲気</span>${esc(m)}</span>`));
+  c.genre.forEach((g) => chips.push(`<span class="chip genre"><span class="k">ジャンル</span>${esc(g)}</span>`));
+  if (c.tempo) chips.push(`<span class="chip tempo"><span class="k">テンポ</span>${TEMPO[c.tempo]}</span>`);
+  if (c.loop === true) chips.push(`<span class="chip loop">ループ推奨</span>`);
+  return `<div class="win"><div class="win-title">読み取った条件</div><div class="chips">${chips.join("")}</div></div>`;
+}
+
+function badge(likelyBgm) {
+  if (likelyBgm === true) return `<span class="badge bgm">BGM</span>`;
+  if (likelyBgm === false) return `<span class="badge se">SE</span>`;
+  return `<span class="badge unk">?</span>`;
+}
+
+// tracks: [{ id, filename, rel_path, root_label, duration_sec, likely_bgm, readable, missing }]
+function tracksHtml(tracks, title) {
+  const rows = tracks.map((t, i) => `
+    <li class="track ${t.missing ? "missing" : ""}">
+      <span class="rank num">${i + 1}</span>
+      <button class="icon-btn" title="試聴" ${t.readable && !t.missing ? "" : "disabled"}>▶</button>
+      <div class="info">
+        <div class="name">${esc(t.filename)}</div>
+        <div class="path">${esc(t.root_label)} / ${esc(t.rel_path)}</div>
+        ${t.missing ? `<div class="note">見つかりません（今の目録にありません）</div>` : ""}
+        ${!t.missing && !t.readable ? `<div class="note">このファイルは再生できません</div>` : ""}
+      </div>
+      ${badge(t.likely_bgm)}
+      <span class="dur num">${fmtDur(t.duration_sec)}</span>
+      <button class="icon-btn folder" title="エクスプローラーで開く" ${t.missing ? "disabled" : ""}>📂</button>
+    </li>`).join("");
+  return `<div class="win"><div class="win-title">${title} <span class="sub">${tracks.length}件</span></div><ul class="tracks">${rows}</ul></div>`;
+}
+
+// links: [{ site_name, label, url }]
+function sitesHtml(links) {
+  const groups = {};
+  links.forEach((l) => (groups[l.site_name] ??= []).push(l));
+  const cards = Object.entries(groups).map(([name, ls]) => `
+    <div class="site"><h4>${esc(name)}</h4>
+      ${ls.map((l) => `<a href="#" title="${esc(l.url)}"><span>${esc(l.label)}</span><span class="ext">サイトで開く ↗</span></a>`).join("")}
+    </div>`).join("");
+  return `<div class="win"><div class="win-title">国内サイトで探す <span class="sub">試聴・ダウンロードはサイト側で</span></div><div class="sites">${cards}</div></div>`;
+}
+
+/* ---------- AIの応答 → 画面用の形（本番ではサーバーがやる処理の真似） ---------- */
+function buildResult(res) {
+  const tracks = res.local.map(({ id }) => {
+    const f = fileOf(id);
+    return { id, filename: f.filename, rel_path: f.rel_path, root_label: rootOf(f.root_id).label,
+             duration_sec: f.duration_sec, likely_bgm: f.likely_bgm, readable: f.readable, missing: false };
+  });
+  const links = res.sites.map((s) => {
+    const site = sites.sites.find((x) => x.id === s.site_id);
+    if (s.type === "category") {
+      const cat = site.categories.find((c) => c.id === s.category_id);
+      return { site_name: site.name, label: cat.name, url: cat.url };
+    }
+    return { site_name: site.name, label: `検索：${s.q}`, url: site.search_url.replace("{q}", encodeURIComponent(s.q)) };
+  });
+  return { tracks, links };
+}
+
+/* =====================================================================
+   画面の描画
+   ===================================================================== */
+function renderSearch(state) {
+  const body = $("#search-body");
+  const r = buildResult(aiResponse);
+  const result = conditionsHtml(aiResponse.conditions) + tracksHtml(r.tracks, "手持ちの素材") + sitesHtml(r.links);
+  const missingRoot = config.roots.find((x) => index.roots.find((y) => y.id === x.id).status === "missing");
+
+  const views = {
+    "result": result,
+    "result-warn": `<div class="band warn">⚠<div class="msg">フォルダ「${esc(missingRoot.label)}」が見つかりません<small>${esc(missingRoot.path)} を飛ばして検索しました。外付けドライブが外れていないか確認してください。</small></div></div>` + result,
+    "loading": `<div class="win loading"><div class="spell">サウンドを探索中<span class="dots"><span>.</span><span>.</span><span>.</span></span></div><div class="elapsed num">経過 12 秒</div></div>`,
+    "empty": conditionsHtml(aiResponse.conditions) + `<div class="win empty"><div class="big">該当なし</div><p>こんな言い方で試してみてください：</p><ul><li>ジャンルを外す（例：「ボス戦、緊迫感」だけにする）</li><li>英語で書く（例：「boss battle, epic」）</li><li>近い場面に言い換える（例：「強敵との戦闘」）</li></ul></div>`,
+    "err-login": `<div class="band error">✖<div class="msg">Claude Code にログインしてください<small>ターミナルで「claude」を起動してログインしてから、もう一度「探す」を押してください。</small></div></div>`,
+    "err-limit": `<div class="band error">✖<div class="msg">利用上限に達しました<small>23:00 ごろ回復する見込みです。</small></div></div>`,
+    "err-timeout": `<div class="band error">⌛<div class="msg">時間切れ（60秒以内に応答がありませんでした）</div><button class="btn small">再試行</button></div>`
+  };
+  body.innerHTML = views[state];
+}
+
+function renderHistory(selectedId) {
+  $("#hist-list").innerHTML = history.entries.map((e) => `
+    <li data-id="${e.id}" class="${e.id === selectedId ? "active" : ""}">
+      <div class="q">${esc(e.query)}</div>
+      <div class="meta num">${fmtDate(e.created_at)}　${KIND[e.conditions.kind]}　${e.elapsed_sec}秒</div>
+    </li>`).join("");
+
+  const e = history.entries.find((x) => x.id === selectedId);
+  const tracks = e.local.map((t) => {
+    const f = fileOf(t.id);
+    return { ...t, likely_bgm: f ? f.likely_bgm : null, readable: f ? f.readable : false, missing: !f };
+  });
+  $("#hist-detail").innerHTML =
+    `<div class="hist-head"><span class="q">${esc(e.query)}</span><span class="num">${fmtDate(e.created_at)}</span>　保存された結果を表示中（AIは呼びません）</div>` +
+    conditionsHtml(e.conditions) + tracksHtml(e.local.length ? tracks : [], "手持ちの素材") + sitesHtml(e.sites);
+
+  document.querySelectorAll("#hist-list li").forEach((li) => li.onclick = () => renderHistory(li.dataset.id));
+}
+
+function renderSettings() {
+  const total = index.roots.reduce((a, r) => a + r.file_count, 0);
+  $("#stats").innerHTML = `
+    <div class="stat"><div class="k">登録フォルダ</div><div class="v num">${config.roots.length}</div></div>
+    <div class="stat"><div class="k">目録のファイル数</div><div class="v num">${total.toLocaleString()}</div></div>
+    <div class="stat"><div class="k">最後のスキャン</div><div class="v num" style="font-size:16px">${fmtDate(index.scanned_at)}</div></div>`;
+  $("#roots").innerHTML = config.roots.map((r) => {
+    const st = index.roots.find((x) => x.id === r.id);
+    return `<tr>
+      <td><span class="toggle ${r.enabled ? "on" : ""}"></span></td>
+      <td><b>${esc(r.label)}</b><div class="path">${esc(r.path)}</div></td>
+      <td>${st.status === "ok" ? `<span class="status-ok">● OK</span>` : `<span class="status-missing">● 見つかりません</span>`}</td>
+      <td class="num">${st.file_count.toLocaleString()}</td>
+      <td><button class="btn small danger">削除</button></td>
+    </tr>`;
+  }).join("");
+}
+
+/* ---------- 画面とモック状態の切り替え ---------- */
+document.querySelectorAll("nav button").forEach((b) => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b));
+  document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("active", s.id === `screen-${b.dataset.screen}`));
+  $("#mockbar").style.display = b.dataset.screen === "search" ? "flex" : "none";
+});
+document.querySelectorAll("#mockbar button").forEach((b) => b.onclick = () => {
+  document.querySelectorAll("#mockbar button").forEach((x) => x.classList.toggle("active", x === b));
+  renderSearch(b.dataset.state);
+});
+
+renderSearch("result");
+renderHistory(history.entries[0].id);
+renderSettings();
+</script>
+</body>
+</html>
