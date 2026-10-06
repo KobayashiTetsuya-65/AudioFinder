@@ -98,10 +98,19 @@
 | 画面 | 素のHTML・CSS・JavaScript（ビルド作業なし、外部ライブラリなし） |
 | AI | `claude -p`（子プロセス） |
 | テスト | pytest（FastAPIの TestClient を使う） |
-| 依存の管理 | `requirements.txt` ＋ 仮想環境 `.venv` |
+| 依存の管理 | 仮想環境 `.venv` ＋ 2つの依存ファイル（下記） |
 | 待ち受け | **`127.0.0.1:8765`**（自分のPCの中からしか開けない。ポートは `config.json` で変更可） |
 
-前提：PCにPython 3.12以上と、ログイン済みのClaude Codeが入っていること（2026-10-06時点ではPython未インストール）。
+前提：PCにPython 3.12以上と、ログイン済みのClaude Codeが入っていること。
+
+#### 依存ファイル
+| ファイル | 中身 | 入れるタイミング |
+|---|---|---|
+| `requirements.txt` | 動かすのに必要なもの：`fastapi`、`uvicorn`、`mutagen` | `start.bat` の初回 |
+| `requirements-dev.txt` | `-r requirements.txt` ＋ テスト用：`pytest`、`httpx` | テストする前に手動で |
+
+- **バージョンは `==` で固定する**（例：`fastapi==0.xx.x`）。ライブラリが勝手に新しくなって、ある日突然動かなくなるのを防ぐため。上げるときは、テストを通してから固定値を書き換える
+- 依存しているライブラリ（`starlette`、`pydantic` など）は固定しない。自動で入るものに任せる
 
 #### 選定の経緯
 次の3つを比べた。条件は「ブラウザで動く、使いやすさ重視」。
@@ -119,7 +128,7 @@
 
 ### 7.3 起動
 - **`start.bat` をダブルクリック**すると、次の順に動く
-  1. `.venv` がなければ作り、`requirements.txt` の中身をインストールする（初回だけ）
+  1. `.venv` がなければ作り、`requirements.txt` の中身をインストールする（初回だけ。テスト用は入れない）
   2. サーバーを立ち上げ、ブラウザで `http://127.0.0.1:8765` を開く
 - 終了はコンソールウィンドウを閉じる
 - 常駐・自動起動はしない
@@ -132,7 +141,8 @@
 audio-finder/
 ├─ SPEC.md
 ├─ start.bat
-├─ requirements.txt
+├─ requirements.txt       … 動かす用（バージョン固定）
+├─ requirements-dev.txt   … テスト用（バージョン固定）
 ├─ app/
 │  ├─ main.py          … FastAPI本体（APIと画面の配信）
 │  ├─ scanner.py       … フォルダをスキャンして目録を作る
@@ -440,3 +450,4 @@ audio-finder/
 | Q16 | 起動 | `start.bat` をダブルクリック |
 | 追加 | 技術スタックの再検討 | 3候補を比べたうえでPython ＋ FastAPI ＋ 素のHTML/JSのまま（7.1） |
 | 追加 | データ構造 | 9章のとおり。目録は1件1行、AIにURLを作らせない、履歴に写しを残す |
+| 追加 | 依存ファイル | 動かす用とテスト用に分け、バージョンを `==` で固定する（7.1） |

@@ -9,13 +9,14 @@
 ## 技術スタック
 Python 3.12+ / FastAPI + uvicorn / mutagen / 画面は素のHTML・CSS・JS（ビルドなし・外部ライブラリなし）/ AIは `claude -p` / テストは pytest
 データ構造は SPEC.md 9章に従う（項目名・型を勝手に変えない）
+依存は `requirements.txt`（動かす用）と `requirements-dev.txt`（テスト用）に分け、バージョンは `==` で固定する
 
 ## 実行方法
 - `start.bat` をダブルクリック（初回は `.venv` 作成と依存のインストールも行う）→ `http://127.0.0.1:8765` が開く
 - 前提：Python 3.12以上と、ログイン済みの Claude Code
 
 ## テスト方法
-- 自動：`.venv\Scripts\python -m pytest`（`claude -p` は偽物に差し替える。本物は呼ばない）
+- 自動：初回だけ `.venv\Scripts\python -m pip install -r requirements-dev.txt`、その後 `.venv\Scripts\python -m pytest`（`claude -p` は偽物に差し替える。本物は呼ばない）
 - 手動：画面操作・試聴・エクスプローラー連携・本物の `claude -p` との接続は、起動して実際に確かめる
 
 ## 作業ルール
