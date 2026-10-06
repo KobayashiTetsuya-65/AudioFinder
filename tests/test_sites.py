@@ -137,7 +137,7 @@ def test_repo_sites_json_is_well_formed():
     data = json.loads(REPO_SITES.read_text(encoding="utf-8"))
     assert data["version"] == 1
     sites = data["sites"]
-    assert [s["id"] for s in sites] == ["maou", "soundeffect_lab", "opentracks"]
+    assert [s["id"] for s in sites] == ["maou", "soundeffect_lab", "opentracks", "amacha", "bgmer", "otologic", "bgmusic"]
     for s in sites:
         assert set(s) == {"id", "name", "top_url", "search_url", "kinds", "categories", "note"}
         assert s["top_url"].startswith("https://")

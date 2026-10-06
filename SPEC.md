@@ -57,7 +57,7 @@
 - 「再スキャン」ボタンで目録（`index.json`）を作り直す。**自動更新・フォルダ監視はしない**
 
 ### 5.2 国内フリー素材サイト（ツールはアクセスしない）
-- 対象：**魔王魂 / 効果音ラボ / OpenTracks（旧DOVA-SYNDROME）**
+- 対象：**魔王魂 / 効果音ラボ / OpenTracks（旧DOVA-SYNDROME） / 甘茶の音楽工房 / BGMer / OtoLogic / BGMusic**（後ろの4つは2026-10-07に追加）
 - ツールは各サイトに**一切アクセスしない**。AIが `sites.json` をもとに、カテゴリページや検索ページへのリンクを組み立てるだけ
 - リンクをクリックして検索するのは利用者本人（人）なので、robots.txtの対象外
 
@@ -387,7 +387,7 @@ audio-finder/
 
 | 項目 | 型 | 説明 |
 |---|---|---|
-| `sites[].id` | string | `maou` / `soundeffect_lab` / `opentracks` |
+| `sites[].id` | string | `maou` / `soundeffect_lab` / `opentracks` / `amacha` / `bgmer` / `otologic` / `bgmusic` |
 | `sites[].name` | string | 表示名 |
 | `sites[].top_url` | string | トップページのURL |
 | `sites[].search_url` | string \| null | 検索URLの型。`{q}` に検索語（URLエンコード済み）が入る。サイト内検索がなければ `null` |
@@ -439,8 +439,8 @@ audio-finder/
 | # | やらないこと | 理由 |
 |---|---|---|
 | 1 | 国内サイトへのアクセス（スクレイピング、サイト内検索の自動実行、サイトマップ取得） | 規約とrobots.txtのグレーゾーンを避ける |
-| 2 | 国内サイトの音源の試聴・ダウンロード・直リンク | 3サイトとも規約でNG。必ずサイト側で行う |
-| 3 | 音源データをAIに渡すこと、AIの学習に使うこと | 3サイトの規約でNG |
+| 2 | 国内サイトの音源の試聴・ダウンロード・直リンク | 魔王魂・効果音ラボ・OpenTracks・甘茶の音楽工房は規約でNG。ほかのサイトも同じ扱いにし、必ずサイト側で行う |
+| 3 | 音源データをAIに渡すこと、AIの学習に使うこと | 魔王魂・効果音ラボ・OpenTracksの規約でNG。ほかのサイトも同じ扱いにする |
 | 4 | Freesoundなど海外サイトの検索 | 対象は国内サイトとローカル素材のみ |
 | 5 | 音の中身の解析（テンポ、明るさなど） | 手間が大きい |
 | 6 | AIが使えないときの簡易検索 | 結果の質が低く、保守の手間に見合わない |
@@ -474,6 +474,23 @@ audio-finder/
   - https://soundeffect-lab.info/agreement/
   - https://opentracks.com/help/articles/license/
   - 各サイトの robots.txt
+
+#### 追加した4サイト（2026-10-07時点）
+| | 甘茶の音楽工房 | BGMer | OtoLogic | BGMusic |
+|---|---|---|---|---|
+| 扱う種類 | BGMのみ | BGMのみ | BGM・ジングル・効果音 | BGMのみ（ジングル含む） |
+| ページへのリンク・誘導 | 禁止されていない（リンクやクレジットは歓迎と記載） | 記述なし（禁止されていない） | 記述なし（禁止されていない） | 記述なし（禁止されていない） |
+| 音源ファイルへの直リンク | NGと明記 | 記述なし（詳細規約は未確認） | 記述なし | 記述なし |
+| サイト外での配布 | 2次配布NG | 再配布は禁止していない（自作と偽る・販売はNG） | CC BY 4.0（クレジット表記で自由） | 再配布・販売NG |
+| 自動取得 | 規約に記述なし。robots.txtなし | **規約で、ボット・スクレイピングによるデータ収集と一括ダウンロードを禁止** | 規約に記述なし。robots.txtなし | 規約に記述なし。robots.txtはすべて許可 |
+| AI | 記述なし | AI学習OKと明記 | 記述なし | 記述なし |
+| サイト内検索 | なし（URLで検索できない）→ `search_url` は `null` | あり | なし（URLで検索できない）→ `search_url` は `null` | あり |
+
+- 出典：
+  - https://amachamusic.chagasi.com/terms.html
+  - https://bgmer.net/terms/
+  - https://otologic.jp/free/license.html
+  - https://bgmusic.jp/terms/
 - 規約は変わることがあるので、`sites.json` を更新するときにあわせて確認する
 
 ### Claude Codeの利用枠で動かすこと
