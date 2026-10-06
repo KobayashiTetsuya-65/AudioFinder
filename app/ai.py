@@ -271,12 +271,16 @@ def validate(answer: dict, known_ids, sites: list = ()) -> dict:
 
 
 def search(query: str, data_dir: Path, known_ids, timeout_sec: float, runner=run_claude, sites: list = (),
-           retries: int = 1) -> dict:
+           retries: int = 1, root_ids=None) -> dict:
     """場面の説明から、条件・ローカル候補・サイトへの案内を返す。作業フォルダは data/（AIはそこの index.json を検索する）。
 
     retries：応答がJSONとして読めなかったときに自動で呼び直す回数（config の ai.retry_on_invalid_json）。
+    root_ids：候補にしてよい登録フォルダの root_id。目録には無効にしたフォルダの行も残っていることがあるので、AIに伝える。
     """
-    prompt = f"場面の説明：\n{query}\n\n誘導先サイトの一覧：\n{sites_for_prompt(list(sites))}"
+    prompt = f"場面の説明：\n{query}\n\n"
+    if root_ids is not None:
+        prompt += f"検索対象の登録フォルダ（root_id）：{', '.join(root_ids) or 'なし'}\n\n"
+    prompt += f"誘導先サイトの一覧：\n{sites_for_prompt(list(sites))}"
     for attempt in range(retries + 1):
         try:
             answer = _parse_answer(runner(prompt, data_dir, timeout_sec))

@@ -199,13 +199,17 @@ def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR, ai_runner=ai.run_claud
         # 今は見つからない登録フォルダ（外付けドライブを外しているなど）は飛ばし、画面で注意する（SPEC 10章）
         missing = [r for r in config["roots"] if r["enabled"] and not Path(r["path"]).is_dir()]
         missing_ids = {r["id"] for r in missing}
-        known_ids = {fid for fid, f in files.items() if f["root_id"] not in missing_ids}
+        # 候補にしてよいのは、有効で今も見つかる登録フォルダの素材だけ。
+        # 無効にした・登録から外したフォルダの素材は、再スキャン前で目録に残っていても出さない（SPEC 9.2 の enabled）
+        active_root_ids = sorted({r["id"] for r in config["roots"] if r["enabled"]} - missing_ids)
+        known_ids = {fid for fid, f in files.items() if f["root_id"] in active_root_ids}
 
         searched_at = datetime.now(JST)
         started = time.monotonic()
         try:
             result = ai.search(query, data_dir, known_ids, config["ai"]["timeout_sec"], ai_runner,
-                               storage.load_sites(data_dir), config["ai"].get("retry_on_invalid_json", 1))
+                               storage.load_sites(data_dir), config["ai"].get("retry_on_invalid_json", 1),
+                               active_root_ids)
         except ai.AIError as e:
             # detail は他のAPIと同じく文字列。帯の出し分け用に種類と説明を添える
             return JSONResponse({"detail": str(e), "error": {"kind": e.kind, "hint": e.hint}}, status_code=502)
