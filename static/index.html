@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio Finder</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div class="logo">♪ AUDIO FINDER<small>SOUND QUEST FOR GAME DEV</small></div>
+  <nav>
+    <button data-screen="search" class="active">探す</button>
+    <button data-screen="history">履歴</button>
+    <button data-screen="settings">設定</button>
+  </nav>
+</header>
+
+<main>
+  <!-- 8.2 「探す」画面 -->
+  <section id="screen-search" class="screen active">
+    <div class="win">
+      <div class="win-title">どんな場面の音を探す？</div>
+    </div>
+  </section>
+
+  <!-- 8.3 「履歴」画面 -->
+  <section id="screen-history" class="screen">
+    <div class="win">
+      <div class="win-title">冒険の記録 <span class="sub">直近50件</span></div>
+    </div>
+  </section>
+
+  <!-- 8.4 「設定」画面 -->
+  <section id="screen-settings" class="screen">
+    <div class="win">
+      <div class="win-title">目録 <span class="sub">ローカル素材のスキャン</span></div>
+    </div>
+    <div class="win">
+      <div class="win-title">検索対象フォルダ</div>
+    </div>
+    <div class="win">
+      <div class="win-title">フォルダを追加</div>
+    </div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
