@@ -151,16 +151,17 @@ def search_error(data_dir, runner):
 def test_not_logged_in(data_dir):
     # 実物の claude -p（2.1.291）で、ログインしていないときに返ってきた文
     body = search_error(data_dir, error_runner({"result": "Not logged in · Please run /login"}))
-    assert body["detail"] == "Claude Code にログインしてください"
+    assert body["detail"] == "Claude Code の認証に失敗しました"
     assert body["error"]["kind"] == "login"
-    assert "ログイン" in body["error"]["hint"]
+    assert "ANTHROPIC_API_KEY" in body["error"]["hint"]
 
 
 def test_claude_not_installed(data_dir, monkeypatch):
     monkeypatch.setattr(ai.shutil, "which", lambda name: None)
     body = search_error(data_dir, ai.run_claude)  # 本物の run_claude だが、claude が見つからないので起動しない
     assert body["error"]["kind"] == "login"
-    assert "見つかりません" in body["error"]["hint"]
+    assert body["detail"] == "Claude Code が見つかりません"
+    assert "インストール" in body["error"]["hint"]
 
 
 @pytest.mark.parametrize("outer, hint", [
@@ -196,6 +197,68 @@ def test_run_claude_timeout(monkeypatch, tmp_path):
         ai.run_claude("ボス", tmp_path, 1)
     assert e.value.kind == "timeout"
     assert str(e.value) == "時間切れ（1秒以内に応答がありませんでした）"
+
+
+# ---------- APIキー（.env） ----------
+
+@pytest.mark.parametrize("text, key", [
+    ("ANTHROPIC_API_KEY=sk-ant-dummy\n", "sk-ant-dummy"),
+    ('# コメント\n\nOTHER=1\nANTHROPIC_API_KEY = "sk-ant-quoted"\n', "sk-ant-quoted"),
+    ("export ANTHROPIC_API_KEY='sk-ant-export'\n", "sk-ant-export"),
+    ("﻿ANTHROPIC_API_KEY=sk-ant-bom\n", "sk-ant-bom"),  # メモ帳で保存したBOM付きUTF-8
+    ("ANTHROPIC_API_KEY=\n", None),  # .env.example を写しただけで、値が空
+    ("# ANTHROPIC_API_KEY=sk-ant-commented\n", None),
+])
+def test_read_api_key(tmp_path, text, key):
+    path = tmp_path / ".env"
+    path.write_text(text, encoding="utf-8")
+    assert ai.read_api_key(path) == key
+
+
+def test_read_api_key_without_env_file(tmp_path):
+    assert ai.read_api_key(tmp_path / ".env") is None
+
+
+def test_run_claude_passes_api_key_from_env_file(monkeypatch, tmp_path):
+    """本物の run_claude が、.env のAPIキーを子プロセスの環境変数として渡す（claude は起動しない）。"""
+    env_file = tmp_path / ".env"
+    env_file.write_text("ANTHROPIC_API_KEY=sk-ant-dummy\n", encoding="utf-8")
+    monkeypatch.setattr(ai, "ENV_PATH", env_file)
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw, args=(cmd,))
+        return ai.subprocess.CompletedProcess(cmd, 0, stdout='{"ok": true}', stderr="")
+
+    monkeypatch.setattr(ai.shutil, "which", lambda name: "claude")
+    monkeypatch.setattr(ai.subprocess, "run", fake_run)
+    ai.run_claude("ボス", tmp_path, 60)
+    assert seen["env"]["ANTHROPIC_API_KEY"] == "sk-ant-dummy"
+    assert seen["env"]["CLAUDE_CODE_MAX_RETRIES"] == "2"  # 無効なキーでも数秒でエラーが返るように
+    assert "--bare" in seen["args"][0]  # ログイン情報より APIキーを使わせる
+    assert "sk-ant-dummy" not in seen["input"]  # キーはプロンプトにもコマンドラインにも入れない
+    assert "sk-ant-dummy" not in " ".join(seen["args"][0])
+
+
+def test_run_claude_without_env_file_uses_login(monkeypatch, tmp_path):
+    """.env がなければ今までどおり、ログイン中のアカウントで動かす（--bare を付けない）。"""
+    monkeypatch.setattr(ai, "ENV_PATH", tmp_path / ".env")
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw, cmd=cmd)
+        return ai.subprocess.CompletedProcess(cmd, 0, stdout='{"ok": true}', stderr="")
+
+    monkeypatch.setattr(ai.shutil, "which", lambda name: "claude")
+    monkeypatch.setattr(ai.subprocess, "run", fake_run)
+    ai.run_claude("ボス", tmp_path, 60)
+    assert "--bare" not in seen["cmd"]
+
+
+def test_no_api_key_keeps_environment(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-os")
+    env = ai.claude_env(None)
+    assert env["ANTHROPIC_API_KEY"] == "sk-ant-from-os"  # .env にキーがなければ、もとの環境変数のまま
 
 
 def flaky_runner(outputs):
@@ -363,6 +426,13 @@ def test_no_index_yet(data_dir):
 
 
 # ---------- claude -p の呼び方 ----------
+
+def test_command_adds_bare_only_with_api_key():
+    assert "--bare" not in ai.build_command("claude")
+    with_key = ai.build_command("claude", api_key=True)
+    assert with_key[:3] == ["claude", "-p", "--bare"]
+    assert with_key[3:] == ai.build_command("claude")[2:]  # 読み取り専用などの制限はそのまま
+
 
 def test_command_allows_only_read_only_tools():
     cmd = ai.build_command("claude")

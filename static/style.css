@@ -161,7 +161,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px 16px; }
   padding: 6px 10px; border-radius: 3px; margin-bottom: 6px; border: 1px solid #ffffff1a; background: #ffffff08;
 }
 .site a:hover { border-color: var(--cyan); color: var(--cyan); }
-.site a .ext { color: var(--muted); font-size: 12px; }
+.site a .ext { color: var(--muted); font-size: 12px; white-space: nowrap; flex: none; } /* 狭いカードでも「サイトで開く ↗」を折り返さない */
 
 .empty { text-align: center; padding: 28px 0; }
 .empty .big { font-size: 20px; color: var(--muted); font-weight: 700; letter-spacing: .1em; }

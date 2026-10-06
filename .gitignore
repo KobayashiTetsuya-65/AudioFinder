@@ -6,3 +6,7 @@ data/config.json
 data/index.json
 data/history.json
 data/*.tmp
+# APIキー（.env.example は見本なので管理する）
+.env
+.env.*
+!.env.example
