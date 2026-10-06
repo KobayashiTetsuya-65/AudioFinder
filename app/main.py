@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -195,12 +195,18 @@ def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR, ai_runner=ai.run_claud
         files = {f["id"]: f for f in index["files"]}
         labels = {r["id"]: r["label"] for r in config["roots"]}
 
+        # 今は見つからない登録フォルダ（外付けドライブを外しているなど）は飛ばし、画面で注意する（SPEC 10章）
+        missing = [r for r in config["roots"] if r["enabled"] and not Path(r["path"]).is_dir()]
+        missing_ids = {r["id"] for r in missing}
+        known_ids = {fid for fid, f in files.items() if f["root_id"] not in missing_ids}
+
         started = time.monotonic()
         try:
-            result = ai.search(query, data_dir, files.keys(), config["ai"]["timeout_sec"], ai_runner,
-                               storage.load_sites(data_dir))
+            result = ai.search(query, data_dir, known_ids, config["ai"]["timeout_sec"], ai_runner,
+                               storage.load_sites(data_dir), config["ai"].get("retry_on_invalid_json", 1))
         except ai.AIError as e:
-            raise HTTPException(502, str(e))
+            # detail は他のAPIと同じく文字列。帯の出し分け用に種類と説明を添える
+            return JSONResponse({"detail": str(e), "error": {"kind": e.kind, "hint": e.hint}}, status_code=502)
         elapsed = round(time.monotonic() - started, 1)
 
         # 画面に出す情報を目録から足す（AIが返すのはIDだけ）
@@ -217,7 +223,8 @@ def create_app(data_dir: Path = storage.DEFAULT_DATA_DIR, ai_runner=ai.run_claud
                 "readable": f["readable"],
             })
         return {"query": query, "elapsed_sec": elapsed, "conditions": result["conditions"], "local": local,
-                "sites": result["sites"]}
+                "sites": result["sites"],
+                "missing_roots": [{"id": r["id"], "label": r["label"], "path": r["path"]} for r in missing]}
 
     # ---------- 試聴・エクスプローラーで開く ----------
 
